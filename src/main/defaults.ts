@@ -68,6 +68,7 @@ export function defaultState(home: string, now: Date = new Date()): AppState {
     savedFilters: [],
     activeSession: null,
     songCache: {},
+    songFlags: {},
     pendingSidecarEdits: []
   }
 }

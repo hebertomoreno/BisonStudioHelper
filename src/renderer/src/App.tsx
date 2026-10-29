@@ -1,6 +1,9 @@
 import { useState } from 'react'
+import { useLibrary } from './lib/useLibrary'
+import { MainListView } from './views/MainListView'
 import { Placeholder } from './views/Placeholder'
 import { SettingsView } from './views/SettingsView'
+import { ShelfView } from './views/ShelfView'
 
 type ViewId = 'main' | 'board' | 'shelf' | 'releases' | 'inbox' | 'settings'
 
@@ -15,8 +18,24 @@ const VIEWS: { id: ViewId; label: string; step: string }[] = [
 ]
 
 export function App(): JSX.Element {
-  const [view, setView] = useState<ViewId>('settings')
+  const [view, setView] = useState<ViewId>('main')
+  const library = useLibrary()
   const current = VIEWS.find((v) => v.id === view)!
+  const shelfCount = library?.songs.filter((s) => s.lane === 'shelf').length ?? 0
+
+  function render(): JSX.Element {
+    if (view === 'settings') return <SettingsView />
+    if (!library) {
+      return (
+        <section className="view">
+          <p className="muted">Loading songs…</p>
+        </section>
+      )
+    }
+    if (view === 'main') return <MainListView snapshot={library} />
+    if (view === 'shelf') return <ShelfView snapshot={library} />
+    return <Placeholder title={current.label} step={current.step} />
+  }
 
   return (
     <div className="app">
@@ -30,16 +49,11 @@ export function App(): JSX.Element {
             onClick={() => setView(v.id)}
           >
             {v.label}
+            {v.id === 'shelf' && shelfCount > 0 && <span className="count">{shelfCount}</span>}
           </button>
         ))}
       </nav>
-      <main className="content">
-        {view === 'settings' ? (
-          <SettingsView />
-        ) : (
-          <Placeholder title={current.label} step={current.step} />
-        )}
-      </main>
+      <main className="content">{render()}</main>
     </div>
   )
 }

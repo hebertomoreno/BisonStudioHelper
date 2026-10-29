@@ -62,7 +62,7 @@ Every song is in one of three **lanes**:
 
 A song with no entry in `lanes` (fresh install, or a sidecar from another Mac) goes to Shelf.
 
-Newly discovered songs carry a "New" tag until they leave the Shelf or the user opens their detail view.
+Newly discovered songs carry a "New" tag until they leave the Shelf or the user opens their detail view. The very first scan (empty `songCache`) imports every existing song without the tag, so it only marks songs that appear later.
 
 Separately, every song has a **status**:
 
@@ -197,18 +197,21 @@ App-level state lives in `app.getPath('userData')/state.json`:
   "activeSession": { "songId": "...", "sessionId": "...", "startedAt": "..." },
   "songCache": {
     "<songId>": {
-      "path": "/abs/path/Song Project", "rootPath": "/Volumes/Feather/Songs",
+      "path": "/abs/path/Song Project", "rootPath": "/Volumes/Feather/Songs", "folder": "Rough Ideas",
       "title": "...", "status": "demo", "excitement": 4, "latestNext": "...",
-      "lastWorkedAt": "...", "collectState": "collected", "releases": ["..."], "seenAt": "..."
+      "lastWorkedAt": "...", "collectState": "collected", "releases": ["..."], "seenAt": "...",
+      "notFound": false
     }
   },
+  "songFlags": { "<songId>": { "new": true, "duplicateOf": "Earth" } },
   "pendingSidecarEdits": [{ "songId": "...", "op": "renameRelease", "from": "Old", "to": "New" }]
 }
 ```
 
 The values above are the defaults for this user's machine (section 0); `<user>` is filled in at runtime.
 
-- `songCache` is a read-only copy of each song's display data, refreshed on every scan. It is what the app shows for songs whose drive is not mounted, since their sidecar is unreadable then.
+- `songCache` is a read-only copy of each song's display data, refreshed on every scan. It is what the app shows for songs whose drive is not mounted, since their sidecar is unreadable then. `notFound` is set when the drive was mounted but the folder was missing from the last scan.
+- `songFlags`: the "New" and "Duplicate of" tags (sections 1 and 3).
 - `pendingSidecarEdits`: sidecar changes that could not be written because the drive was unmounted (release renames and deletes, 8b). They are applied when the drive mounts.
 - `folders`: first-level folders under a root's `foldersPath` that are linked to a release. A folder not listed here is a plain folder. The seed values above are this user's current choices (section 0).
 
@@ -224,7 +227,8 @@ The watcher must ignore the app's own sidecar writes: record the mtime and size 
 - On launch and on demand, walk each mounted root for Ableton project folders:
   - Use `lstat` and never follow symlinks (the `_Organized_By_Year_Fixed/` symlinks would otherwise duplicate songs, and some are dangling).
   - Stop descending once a folder is identified as a project; projects are never nested inside projects.
-  - Skip `Backup/`, `Samples/`, `Ableton Project Info/`, bounce folders, `._*` and `.DS_Store`, and every name in the root's `exclude` list.
+  - Skip `Backup/`, `Samples/`, `Ableton Project Info/`, bounce folders, `._*` and `.DS_Store`, and everything in the root's `exclude` list. An entry without a slash matches a folder name at any depth (`MaxForLive`); an entry with a slash is a path relative to the root (`Projects/ReallyHappy/Ableton Sessions/Old Versions`).
+  - A folder with `Ableton Project Info/` but no `.als` (e.g. only an `.alc` clip, like `SNIPS/A moment Project`) is not a song.
   - Default `maxDepth` is 6, since Feather has projects 6 levels below the root.
 - A folder counts as a project regardless of its name (it does not have to end in " Project").
 - A discovered folder without `.finisher.json` gets one created with `status: "idea"` and goes to the Shelf.

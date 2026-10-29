@@ -9,7 +9,16 @@ import {
   type SettingsResult,
   type UpdateSettingsResult
 } from '../shared/ipc'
+import type { Lane, QueueSort, SetLaneResult } from '../shared/songs'
+import type { Library } from './library'
 import { formatZodError, pickSettings, type StateStore } from './state'
+
+const LANES: Lane[] = ['focus', 'queue', 'shelf']
+const QUEUE_SORTS: QueueSort[] = ['lastWorked', 'excitement', 'manual']
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []
+}
 
 // Only answer IPC from our own renderer, never from a navigated-away or injected frame.
 function isTrustedSender(event: IpcMainInvokeEvent): boolean {
@@ -28,7 +37,26 @@ function handle<Args extends unknown[], Result>(
   })
 }
 
-export function registerIpc(store: StateStore): void {
+export function registerIpc(store: StateStore, library: Library, onSettingsSaved: () => void): void {
+  handle(IPC.getLibrary, () => library.snapshot())
+
+  handle(IPC.rescan, () => library.scan())
+
+  handle(IPC.setLane, (_event, ids: unknown, lane: unknown, bumpToQueue: unknown): Promise<SetLaneResult> => {
+    if (!LANES.includes(lane as Lane)) throw new Error(`Unknown lane: ${String(lane)}`)
+    return library.setLane(stringArray(ids), lane as Lane, stringArray(bumpToQueue))
+  })
+
+  handle(IPC.reorder, (_event, lane: unknown, ids: unknown) => {
+    if (lane !== 'focus' && lane !== 'queue') throw new Error(`Cannot reorder lane: ${String(lane)}`)
+    return library.reorder(lane, stringArray(ids))
+  })
+
+  handle(IPC.setQueueSort, (_event, sort: unknown) => {
+    if (!QUEUE_SORTS.includes(sort as QueueSort)) throw new Error(`Unknown sort: ${String(sort)}`)
+    return library.setQueueSort(sort as QueueSort)
+  })
+
   handle(IPC.getSettings, (): SettingsResult => ({
     settings: pickSettings(store.get()),
     warnings: store.warnings
@@ -39,6 +67,7 @@ export function registerIpc(store: StateStore): void {
     if (!parsed.success) return { ok: false, errors: formatZodError(parsed.error) }
     try {
       const next = await store.update((current) => ({ ...current, ...parsed.data }))
+      onSettingsSaved()
       return { ok: true, settings: pickSettings(next) }
     } catch (err) {
       if (err instanceof ZodError) return { ok: false, errors: formatZodError(err) }

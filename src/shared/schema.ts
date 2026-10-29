@@ -36,6 +36,7 @@ export const LaneSchema = z.enum(['focus', 'queue', 'shelf'])
 export const SongCacheEntrySchema = z.object({
   path: z.string(),
   rootPath: z.string(),
+  folder: z.string().nullable().default(null),
   title: z.string(),
   status: z.string(),
   excitement: z.number().nullable(),
@@ -43,7 +44,16 @@ export const SongCacheEntrySchema = z.object({
   lastWorkedAt: z.string().nullable(),
   collectState: z.string(),
   releases: z.array(z.string()),
-  seenAt: z.string()
+  seenAt: z.string(),
+  // True when the root was mounted at the last scan but the folder was not found.
+  notFound: z.boolean().default(false)
+})
+
+export const SongFlagsSchema = z.object({
+  // Discovered after the first scan and not yet out of the Shelf.
+  new: z.boolean().optional(),
+  // Title of the song this one was duplicated from (same id found in two folders).
+  duplicateOf: z.string().optional()
 })
 
 export const AppStateSchema = z.object({
@@ -72,6 +82,7 @@ export const AppStateSchema = z.object({
     .object({ songId: z.string(), sessionId: z.string(), startedAt: z.string() })
     .nullable(),
   songCache: z.record(SongCacheEntrySchema),
+  songFlags: z.record(SongFlagsSchema),
   pendingSidecarEdits: z.array(
     z.object({ songId: z.string(), op: z.string(), from: z.string(), to: z.string().nullable() })
   )
@@ -81,6 +92,7 @@ export type Root = z.infer<typeof RootSchema>
 export type Release = z.infer<typeof ReleaseSchema>
 export type ExcitementLevel = z.infer<typeof ExcitementLevelSchema>
 export type AppState = z.infer<typeof AppStateSchema>
+export type SongCacheEntry = z.infer<typeof SongCacheEntrySchema>
 
 // The part of app state edited from the Settings view (SPEC section 9, view 7).
 export const SETTINGS_KEYS = [
