@@ -13,6 +13,9 @@ const api: FinisherApi = {
   setLane: (ids, lane, bumpToQueue) => ipcRenderer.invoke(IPC.setLane, ids, lane, bumpToQueue),
   reorder: (lane, ids) => ipcRenderer.invoke(IPC.reorder, lane, ids),
   setQueueSort: (sort) => ipcRenderer.invoke(IPC.setQueueSort, sort),
+  addSongToRelease: (songId, releaseId) => ipcRenderer.invoke(IPC.addSongToRelease, songId, releaseId),
+  setTitle: (songId, title) => ipcRenderer.invoke(IPC.setTitle, songId, title),
+  pickReleaseArt: (releaseId) => ipcRenderer.invoke(IPC.pickReleaseArt, releaseId),
   onLibraryChanged: (listener) => {
     const handler = (_event: IpcRendererEvent, snapshot: LibrarySnapshot): void => listener(snapshot)
     ipcRenderer.on(IPC.libraryChanged, handler)

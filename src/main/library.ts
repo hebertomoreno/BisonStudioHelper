@@ -1,10 +1,23 @@
 // The song index: combines scans of mounted roots with songCache for unmounted ones (SPEC sections 1–4).
 import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
-import { basename } from 'node:path'
+import { basename, join, sep } from 'node:path'
 import type { AppState, Root, SongCacheEntry } from '../shared/schema'
 import type { Sidecar } from '../shared/sidecar'
-import type { Lane, LibrarySnapshot, QueueSort, SetLaneResult, SongSummary } from '../shared/songs'
+import {
+  artUrl,
+  bounceUrl,
+  type BouncePreview,
+  type Lane,
+  type LibrarySnapshot,
+  type QueueSort,
+  type ReleaseProgress,
+  type SetLaneResult,
+  type SongRelease,
+  type SongSummary
+} from '../shared/songs'
+import { findBounces, playableFile, previewBounce, type Bounce } from './bounces'
+import type { ReleaseStore } from './releases'
 import { discoverProjects, type AlsFile, type DiscoveredProject } from './scanner'
 import {
   createSidecarFile,
@@ -24,6 +37,7 @@ interface SongRecord {
   wrapperPath: string | null
   sidecar: Sidecar
   newestAls: AlsFile | null
+  bounces: Bounce[]
 }
 
 interface Candidate {
@@ -47,6 +61,22 @@ export function latestNext(sidecar: Sidecar): string | null {
     if (next) return next
   }
   return null
+}
+
+function isInside(path: string, dir: string): boolean {
+  return path.startsWith(dir.replace(/\/+$/, '') + sep)
+}
+
+// A release's progress: its songs' weights over max(song count, planned tracks) (SPEC 8c).
+export function releaseProgress(members: SongSummary[], plannedTracks: number | null): ReleaseProgress {
+  const byStatus: ReleaseProgress['byStatus'] = {}
+  let sum = 0
+  for (const song of members) {
+    if (song.status) byStatus[song.status] = (byStatus[song.status] ?? 0) + 1
+    sum += song.progress ?? 0
+  }
+  const slots = Math.max(members.length, plannedTracks ?? 0)
+  return { value: slots > 0 ? sum / slots : 0, songCount: members.length, plannedTracks, byStatus }
 }
 
 async function isDirectory(path: string): Promise<boolean> {
@@ -76,6 +106,7 @@ export class Library {
 
   constructor(
     private readonly store: StateStore,
+    private readonly releases: ReleaseStore,
     private readonly selfWrites: SelfWrites,
     private readonly onChange: () => void
   ) {}
@@ -179,7 +210,8 @@ export class Library {
         folder: project.folder,
         wrapperPath: project.wrapperPath,
         sidecar,
-        newestAls: project.newestAls
+        newestAls: project.newestAls,
+        bounces: await findBounces(project.path, project.wrapperPath, state.bounceFolderNames)
       })
     }
 
@@ -279,7 +311,7 @@ export class Library {
       latestNext: latestNext(sidecar),
       lastWorkedAt: lastWorkedAt(sidecar, record.newestAls),
       collectState: (sidecar.collect?.['state'] as string | undefined) ?? 'unknown',
-      releases: sidecar.releases,
+      setName: record.newestAls ? record.newestAls.name.replace(/\.als$/i, '') : null,
       seenAt,
       notFound: false
     }
@@ -293,11 +325,13 @@ export class Library {
     return {
       id: `invalid:${project.path}`,
       title: defaultTitle(project.path),
+      setName: null,
       path: project.path,
       rootPath: project.rootPath,
       rootLabel: this.rootLabel(project.rootPath),
       folder: project.folder,
       status: null,
+      progress: null,
       excitement: null,
       latestNext: null,
       lastWorkedAt: null,
@@ -305,8 +339,53 @@ export class Library {
       availability: 'invalid-sidecar',
       isNew: false,
       duplicateOf: null,
-      error
+      error,
+      releases: [],
+      preview: null,
+      bounceCount: 0
     }
+  }
+
+  // Releases a song is on, folder release first (SPEC 8b). Membership comes from releases.json:
+  // songs under a release's folder, minus `excluded`, plus `added`.
+  private songReleases(id: string, path: string): SongRelease[] {
+    const result: SongRelease[] = []
+    for (const r of this.releases.all()) {
+      const inFolder = r.folder !== null && isInside(path, join(r.folder.rootPath, r.folder.path))
+      const added = r.added.includes(id)
+      if (!added && (!inFolder || r.excluded.includes(id))) continue
+      result.push({
+        id: r.id,
+        name: r.name,
+        fromFolder: inFolder && !added,
+        released: r.released,
+        artUrl: r.art ? artUrl(r.art) : null
+      })
+    }
+    return result.sort((a, b) => Number(b.fromFolder) - Number(a.fromFolder))
+  }
+
+  private preview(record: SongRecord): BouncePreview | null {
+    const bounce = previewBounce(record.bounces, record.sidecar.pinnedBounce)
+    if (!bounce) return null
+    const file = playableFile(bounce)
+    return {
+      name: bounce.name,
+      bouncedAt: new Date(bounce.mtimeMs).toISOString(),
+      url: file ? bounceUrl(file.id) : null,
+      format: file?.format ?? null
+    }
+  }
+
+  // Path of a bounce file found by the last scan, for the bounce:// protocol.
+  bounceFilePath(id: string): string | null {
+    for (const record of this.songs.values()) {
+      for (const bounce of record.bounces) {
+        const file = bounce.files.find((f) => f.id === id)
+        if (file) return file.path
+      }
+    }
+    return null
   }
 
   snapshot(): LibrarySnapshot {
@@ -326,12 +405,14 @@ export class Library {
           : 'ok'
       songs.push({
         id,
-        title: entry.title,
+        title: record?.sidecar.title ?? entry.title,
+        setName: entry.setName,
         path: entry.path,
         rootPath: entry.rootPath,
         rootLabel: this.rootLabel(entry.rootPath),
         folder: entry.folder,
         status: (record?.sidecar.status ?? entry.status) as SongSummary['status'],
+        progress: null,
         excitement: entry.excitement,
         latestNext: entry.latestNext,
         lastWorkedAt: entry.lastWorkedAt,
@@ -339,8 +420,14 @@ export class Library {
         availability,
         isNew: flags.new === true,
         duplicateOf: flags.duplicateOf ?? null,
-        error: null
+        error: null,
+        releases: this.songReleases(id, entry.path),
+        preview: record ? this.preview(record) : null,
+        bounceCount: record?.bounces.length ?? 0
       })
+    }
+    for (const song of songs) {
+      song.progress = song.status ? (state.progressWeights[song.status] ?? null) : null
     }
     for (const summary of this.invalid.values()) {
       if (rootPaths.has(summary.rootPath)) songs.push(summary)
@@ -357,6 +444,17 @@ export class Library {
         label: r.label,
         mounted: this.isMounted(r.path),
         songCount: songs.filter((s) => s.rootPath === r.path).length
+      })),
+      releases: this.releases.all().map((r) => ({
+        id: r.id,
+        name: r.name,
+        type: r.type,
+        released: r.released,
+        artUrl: r.art ? artUrl(r.art) : null,
+        progress: releaseProgress(
+          songs.filter((s) => s.releases.some((sr) => sr.id === r.id)),
+          r.plannedTracks
+        )
       })),
       scanning: this.isScanning(),
       lastScanAt: this.lastScanAt,
@@ -418,5 +516,45 @@ export class Library {
   async setQueueSort(queueSort: QueueSort): Promise<void> {
     await this.store.update((s) => ({ ...s, queueSort }))
     this.onChange()
+  }
+
+  // Renames the song in its sidecar. The project folder and .als files keep their names.
+  async setTitle(id: string, title: string): Promise<void> {
+    const trimmed = title.trim()
+    if (!trimmed || trimmed.length > 200) throw new Error('A title needs 1 to 200 characters')
+    const record = this.songs.get(id)
+    if (!record) throw new Error("The song's drive isn't connected, so it can't be renamed now")
+    const sidecar: Sidecar = { ...record.sidecar, title: trimmed }
+    await writeSidecar(record.path, sidecar, this.selfWrites)
+    record.sidecar = sidecar
+    await this.store.update((s) => {
+      const entry = s.songCache[id]
+      return entry ? { ...s, songCache: { ...s.songCache, [id]: { ...entry, title: trimmed } } } : s
+    })
+    this.onChange()
+  }
+
+  // Puts a song on a release (SPEC 8b). Only releases.json changes; the song's folder and
+  // sidecar are not touched, so this works for songs on an unmounted drive too.
+  async addSongToRelease(songId: string, releaseId: string): Promise<void> {
+    const entry = this.store.get().songCache[songId]
+    if (!entry) throw new Error('Unknown song')
+    await this.releases.updateOne(releaseId, (r) => {
+      const inFolder = r.folder !== null && isInside(entry.path, join(r.folder.rootPath, r.folder.path))
+      return {
+        ...r,
+        excluded: r.excluded.filter((id) => id !== songId),
+        added: inFolder || r.added.includes(songId) ? r.added : [...r.added, songId]
+      }
+    })
+    this.onChange()
+  }
+
+  // Sets a release's cover file name. Returns the file it replaced, for the caller to delete.
+  async setReleaseArt(releaseId: string, art: string | null): Promise<string | null> {
+    const previous = this.releases.find(releaseId)?.art ?? null
+    await this.releases.updateOne(releaseId, (r) => ({ ...r, art }))
+    this.onChange()
+    return previous
   }
 }

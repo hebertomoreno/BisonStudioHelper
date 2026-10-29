@@ -69,3 +69,13 @@ export function RootNotices({ snapshot }: { snapshot: LibrarySnapshot }): JSX.El
     </div>
   )
 }
+
+// "Bounced 2 days ago" for the card's preview bounce (SPEC 7a).
+export function Bounced({ song }: { song: SongSummary }): JSX.Element | null {
+  if (!song.preview) return null
+  return (
+    <span className="bounced" title={`${song.preview.name} · ${new Date(song.preview.bouncedAt).toLocaleString()}`}>
+      Bounced {relativeTime(song.preview.bouncedAt)}
+    </span>
+  )
+}

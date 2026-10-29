@@ -1,8 +1,31 @@
 // Loads and saves state.json. No Electron imports, so it can be unit tested.
 import { promises as fs } from 'node:fs'
 import type { ZodError } from 'zod'
+import { z } from 'zod'
 import { AppStateSchema, SETTINGS_KEYS, type AppState, type Settings } from '../shared/schema'
 import { defaultState } from './defaults'
+import type { LegacyReleases } from './releases'
+
+const LegacyReleasesSchema = z.object({
+  releases: z.array(
+    z.object({
+      name: z.string().min(1),
+      type: z.enum(['single', 'EP', 'album', 'other']),
+      released: z.boolean(),
+      targetDate: z.string().nullable(),
+      art: z.string().nullable().optional(),
+      createdAt: z.string()
+    })
+  ),
+  roots: z.array(
+    z.object({
+      path: z.string(),
+      foldersPath: z.string().optional(),
+      folders: z.record(z.object({ release: z.string() })).default({})
+    })
+  ),
+  tracklists: z.record(z.array(z.string())).default({})
+})
 
 export function formatZodError(error: ZodError): string[] {
   return error.issues.map((issue) => {
@@ -30,6 +53,8 @@ export class StateStore {
   private state: AppState
   private writeQueue: Promise<void> = Promise.resolve()
   readonly warnings: string[] = []
+  // Releases found in a state.json from before releases.json existed, for migration.
+  legacyReleases: LegacyReleases | null = null
 
   constructor(
     private readonly file: string,
@@ -68,6 +93,14 @@ export class StateStore {
 
     // Validate field by field, so one bad field falls back to its default instead of resetting everything.
     const source = (loaded && typeof loaded === 'object' ? loaded : {}) as Record<string, unknown>
+    const legacy = LegacyReleasesSchema.safeParse(source)
+    if (legacy.success) {
+      this.legacyReleases = {
+        releases: legacy.data.releases,
+        links: legacy.data.roots.map((r) => ({ rootPath: r.path, foldersPath: r.foldersPath, folders: r.folders })),
+        tracklists: legacy.data.tracklists
+      }
+    }
     const merged: Record<string, unknown> = {}
     for (const [key, schema] of Object.entries(AppStateSchema.shape)) {
       const fallback = defaults[key as keyof AppState]

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { PlayerBar, PlayerProvider } from './components/Player'
 import { useLibrary } from './lib/useLibrary'
 import { MainListView } from './views/MainListView'
 import { Placeholder } from './views/Placeholder'
@@ -38,22 +39,25 @@ export function App(): JSX.Element {
   }
 
   return (
-    <div className="app">
-      <nav className="sidebar" aria-label="Views">
-        <div className="brand">Finisher</div>
-        {VIEWS.map((v) => (
-          <button
-            key={v.id}
-            className={v.id === view ? 'nav-item active' : 'nav-item'}
-            aria-current={v.id === view ? 'page' : undefined}
-            onClick={() => setView(v.id)}
-          >
-            {v.label}
-            {v.id === 'shelf' && shelfCount > 0 && <span className="count">{shelfCount}</span>}
-          </button>
-        ))}
-      </nav>
-      <main className="content">{render()}</main>
-    </div>
+    <PlayerProvider>
+      <div className="app">
+        <nav className="sidebar" aria-label="Views">
+          <div className="brand">Finisher</div>
+          {VIEWS.map((v) => (
+            <button
+              key={v.id}
+              className={v.id === view ? 'nav-item active' : 'nav-item'}
+              aria-current={v.id === view ? 'page' : undefined}
+              onClick={() => setView(v.id)}
+            >
+              {v.label}
+              {v.id === 'shelf' && shelfCount > 0 && <span className="count">{shelfCount}</span>}
+            </button>
+          ))}
+        </nav>
+        <main className="content">{render()}</main>
+        <PlayerBar />
+      </div>
+    </PlayerProvider>
   )
 }

@@ -4,8 +4,10 @@ import { app, BrowserWindow, dialog } from 'electron'
 import { IPC } from '../shared/ipc'
 import { registerIpc } from './ipc'
 import { Library } from './library'
+import { defaultReleases, fromLegacy, ReleaseStore } from './releases'
 import { SelfWrites } from './sidecar'
 import { StateStore } from './state'
+import { handleMediaSchemes, registerMediaSchemes } from './media'
 import { LibraryWatcher } from './watcher'
 
 function createWindow(): BrowserWindow {
@@ -38,6 +40,8 @@ function createWindow(): BrowserWindow {
 // Lets development and tests run against a separate state.json instead of the real one.
 if (process.env['FINISHER_USER_DATA']) app.setPath('userData', process.env['FINISHER_USER_DATA'])
 
+registerMediaSchemes()
+
 // The renderer never navigates or opens windows; block both.
 app.on('web-contents-created', (_event, contents) => {
   contents.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -54,8 +58,18 @@ app.whenReady().then(async () => {
     return
   }
 
+  // Release data lives in its own file; an older state.json's releases move there once.
+  const releases = new ReleaseStore(join(app.getPath('userData'), 'releases.json'))
+  try {
+    await releases.load(() => (store.legacyReleases ? fromLegacy(store.legacyReleases) : defaultReleases()))
+  } catch (err) {
+    dialog.showErrorBox('Finisher could not read its releases', String(err))
+    app.quit()
+    return
+  }
+
   const selfWrites = new SelfWrites()
-  const library = new Library(store, selfWrites, () => {
+  const library = new Library(store, releases, selfWrites, () => {
     const snapshot = library.snapshot()
     for (const window of BrowserWindow.getAllWindows()) {
       window.webContents.send(IPC.libraryChanged, snapshot)
@@ -68,7 +82,10 @@ app.whenReady().then(async () => {
     () => store.get().bounceFolderNames
   )
 
-  registerIpc(store, library, () => {
+  const artDir = join(app.getPath('userData'), 'art')
+  handleMediaSchemes((id) => library.bounceFilePath(id), artDir)
+
+  registerIpc(store, library, releases, artDir, () => {
     // Roots or skip rules may have changed.
     void library.scan().then(() => watcher.restart())
   })

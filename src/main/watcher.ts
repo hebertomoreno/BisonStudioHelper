@@ -4,7 +4,7 @@ import { basename, relative } from 'node:path'
 import chokidar, { type FSWatcher } from 'chokidar'
 import type { Root } from '../shared/schema'
 import type { Library } from './library'
-import { SIDECAR_NAME, shouldSkipDir } from './scanner'
+import { normalizeFolderName, SIDECAR_NAME, shouldSkipDir } from './scanner'
 import type { SelfWrites } from './sidecar'
 
 const RESCAN_DELAY_MS = 1500
@@ -72,17 +72,25 @@ export class LibraryWatcher {
       const name = basename(path)
       if (name === SIDECAR_NAME) return false
       // Applies to files too: hidden files, ._ AppleDouble files and .finisher.json.tmp are skipped.
-      const rules = { exclude: root.exclude, bounceFolderNames: this.getBounceFolderNames() }
+      const rules = { exclude: root.exclude, bounceFolderNames: [] }
+      const bounceNames = new Set(this.getBounceFolderNames().map(normalizeFolderName))
       const parts = rel.split('/')
-      return parts.some((part, i) => shouldSkipDir(part, parts.slice(0, i + 1).join('/'), rules))
+      return parts.some((part, i) => {
+        // A bounce folder and its top-level files are watched, so new exports show up (SPEC 7a);
+        // its subfolders (stems) are not.
+        if (bounceNames.has(normalizeFolderName(part))) return i < parts.length - 2
+        return shouldSkipDir(part, parts.slice(0, i + 1).join('/'), rules)
+      })
     }
 
     const watcher = chokidar.watch(root.path, {
       ignoreInitial: true,
       followSymlinks: false,
       ignorePermissionErrors: true,
-      // A project at maxDepth still needs its own files (.als, sidecar) watched.
-      depth: root.maxDepth + 1,
+      // A project at maxDepth still needs its own files (.als, sidecar) and bounce folders watched.
+      depth: root.maxDepth + 2,
+      // Live may still be writing an export; wait until its size settles.
+      awaitWriteFinish: { stabilityThreshold: 2000, pollInterval: 250 },
       ignored
     })
     watcher.on('all', (_event, path) => void this.onEvent(root.path, path))

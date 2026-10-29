@@ -1,3 +1,12 @@
+/* Departure Mono 1.500 by Helena Zhang, SIL Open Font License (assets/fonts/DepartureMono-LICENSE.txt). */
+@font-face {
+  font-family: 'Departure Mono';
+  src: url('./assets/fonts/DepartureMono-Regular.woff2') format('woff2');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   color-scheme: light dark;
   --bg: #f6f6f4;
@@ -15,6 +24,11 @@
   --bad: #b3261e;
   --bad-bg: #fbe4e2;
   --radius: 8px;
+  --stage-bg: #e4e4e2;
+  --stage-dot: rgb(0 0 0 / 0.13);
+  --pill-bg: #ffffff;
+  --pill-text: #1d1d1b;
+  --mono: 'Departure Mono', ui-monospace, 'SF Mono', Menlo, monospace;
   font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
   font-size: 14px;
 }
@@ -34,6 +48,10 @@
     --warn-bg: #3a2f17;
     --bad: #f28b82;
     --bad-bg: #3b1f1d;
+    --stage-bg: #222221;
+    --stage-dot: rgb(255 255 255 / 0.09);
+    --pill-bg: #3a3a38;
+    --pill-text: #ecebe7;
   }
 }
 
@@ -100,6 +118,7 @@ button:focus-visible {
 .app {
   display: grid;
   grid-template-columns: 200px 1fr;
+  grid-template-rows: minmax(0, 1fr) auto;
   height: 100vh;
 }
 
@@ -401,7 +420,6 @@ select {
 }
 
 .reorder-list,
-.focus-list,
 .queue-list,
 .shelf-list {
   list-style: none;
@@ -412,10 +430,6 @@ select {
   gap: 6px;
 }
 
-.focus-list {
-  gap: 10px;
-}
-
 li.dragging {
   opacity: 0.4;
 }
@@ -424,30 +438,88 @@ li.drop-target {
   box-shadow: 0 -2px 0 var(--accent);
 }
 
-.focus-card {
+.play-button {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-text);
+  border: none;
+}
+
+.play-button svg {
+  margin-left: 1px;
+}
+
+.play-button.is-playing svg {
+  margin-left: 0;
+}
+
+.play-button.small {
+  width: 24px;
+  height: 24px;
+}
+
+.play-button.small svg {
+  width: 11px;
+  height: 11px;
+}
+
+.can-not-preview {
+  font-size: 11px;
+}
+
+.bounced {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.player-bar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 14px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.player-track {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  min-width: 0;
+  width: 220px;
+  font-size: 12px;
 }
 
-.focus-list li[draggable='true'] .focus-card,
+.player-track span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-title {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.player-seek {
+  flex: 1;
+}
+
+.player-time {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  min-width: 36px;
+  text-align: center;
+}
+
 .queue-list li[draggable='true'] .queue-row {
   cursor: grab;
-}
-
-.focus-card-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.focus-card h3 {
-  margin: 0;
-  font-size: 17px;
 }
 
 .meta {
@@ -476,7 +548,7 @@ li.drop-target {
 }
 
 .queue-row {
-  grid-template-columns: minmax(140px, 1.4fr) minmax(120px, 1fr) 100px 100px auto auto;
+  grid-template-columns: 24px minmax(140px, 1.4fr) minmax(120px, 1fr) 100px 100px auto auto;
 }
 
 .shelf-row {
@@ -621,4 +693,558 @@ li.drop-target {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.cover-column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+/* The case sits left of center so the disc has room to peek out on the right. */
+.cover-stage {
+  position: relative;
+  width: 100%;
+  padding-right: 14%;
+}
+
+.cover {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 3px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.25),
+    0 14px 22px -10px rgb(0 0 0 / 0.45);
+}
+
+/* Shelf shadow under the case. */
+.cover-stage::after {
+  content: '';
+  position: absolute;
+  left: 4%;
+  right: 18%;
+  bottom: -10px;
+  height: 12px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgb(0 0 0 / 0.28), transparent);
+  z-index: 0;
+}
+
+.cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Jewel case: hinge on the left and a glossy sheen. */
+.cover-gloss {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgb(255 255 255 / 0.22) 0, rgb(255 255 255 / 0.05) 3%, rgb(0 0 0 / 0.18) 4%, transparent 6%),
+    linear-gradient(125deg, rgb(255 255 255 / 0.28) 0%, rgb(255 255 255 / 0.06) 35%, transparent 36%);
+}
+
+.cover-initials {
+  font-size: clamp(28px, 5vw, 56px);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: rgb(255 255 255 / 0.85);
+}
+
+.disc-slot {
+  position: absolute;
+  top: 4%;
+  right: 4%;
+  width: 78%;
+  aspect-ratio: 1;
+  z-index: 0;
+  transition: transform 0.45s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.cover-stage.is-playing .disc-slot,
+.cover-stage.is-previewing .disc-slot {
+  transform: translateX(9%);
+}
+
+.disc {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, transparent 0 5%, rgb(255 255 255 / 0.5) 5.5% 6%, transparent 6.5%),
+    conic-gradient(from 20deg, #d9d9de, #f6f6f8, #b8c4d8, #f2e3f0, #d4e9e1, #c9c9cf, #f6f6f8, #d9d9de);
+  box-shadow:
+    inset 0 0 0 1px rgb(0 0 0 / 0.12),
+    0 4px 10px rgb(0 0 0 / 0.25);
+}
+
+.cover-stage.is-playing .disc,
+.cover-stage.is-previewing .disc {
+  animation: disc-spin 1.8s linear infinite;
+}
+
+.disc-label {
+  position: absolute;
+  inset: 31%;
+  border-radius: 50%;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.1);
+}
+
+.disc-label img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* The spindle hole. */
+.disc-label::after {
+  content: '';
+  position: absolute;
+  inset: 42%;
+  border-radius: 50%;
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.2);
+}
+
+@keyframes disc-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .disc-slot {
+    transition: none;
+  }
+  .cover-stage.is-playing .disc {
+    animation: none;
+  }
+}
+
+.cover-edit {
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  z-index: 2;
+  font-size: 11px;
+  padding: 2px 7px;
+  background: rgb(0 0 0 / 0.55);
+  color: #fff;
+  border: none;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.cover:hover .cover-edit,
+.cover-edit:focus-visible {
+  opacity: 1;
+}
+
+.cover-play {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 2;
+  width: 42px;
+  height: 42px;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.4);
+}
+
+.cover .can-not-preview {
+  position: absolute;
+  z-index: 2;
+  bottom: 8px;
+  left: 8px;
+  right: 8px;
+  text-align: center;
+  background: rgb(0 0 0 / 0.55);
+  color: #fff;
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+
+.cover-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--bad);
+}
+
+.focus-release {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  opacity: 0.8;
+  letter-spacing: 0.02em;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.song-title {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.25;
+  max-width: 100%;
+}
+
+.title-button {
+  font: inherit;
+  font-weight: 650;
+  border: none;
+  background: none;
+  padding: 0 2px;
+  border-radius: 4px;
+  cursor: text;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.title-button:hover {
+  background: var(--bg);
+}
+
+.title-input {
+  font-size: 16px;
+  font-weight: 650;
+  text-align: center;
+  width: 100%;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 2px 6px;
+  background: var(--surface);
+}
+
+.focus-file {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--muted);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.focus-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 13px;
+}
+
+.focus-details {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 10px;
+  font-size: 12px;
+  color: var(--muted);
+  max-width: 100%;
+}
+
+/* Focus stage: CD cases on a dot-grid stage, the selected one in the middle. */
+
+.focus-stage {
+  position: relative;
+  min-height: 560px;
+  border-radius: 18px;
+  background:
+    radial-gradient(ellipse at 50% 38%, transparent 40%, rgb(0 0 0 / 0.07) 100%),
+    radial-gradient(circle, var(--stage-dot) 1px, transparent 1.5px) 0 0 / 14px 14px,
+    var(--stage-bg);
+  font-family: var(--mono);
+  /* Departure Mono has one weight; a synthesized bold smears the pixels. */
+  font-synthesis: none;
+  overflow: hidden;
+  outline: none;
+}
+
+.focus-stage:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.stage-track {
+  position: relative;
+  height: 320px;
+  perspective: 1100px;
+}
+
+.stage-item {
+  position: absolute;
+  top: 34px;
+  left: 50%;
+  width: 270px;
+  transform-origin: 50% 55%;
+  transition:
+    transform 0.5s cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 0.4s;
+}
+
+.stage-item:not(.is-center) {
+  cursor: pointer;
+  filter: saturate(0.7);
+}
+
+.stage-item:not(.is-center) .cover-stage > *,
+.stage-item:not(.is-center) .cover-error {
+  pointer-events: none;
+}
+
+.stage-item:not(.is-center) .cover-play,
+.stage-item:not(.is-center) .cover-edit,
+.stage-item:not(.is-center) .can-not-preview,
+.stage-item:not(.is-center) .cover-release-picker {
+  display: none;
+}
+
+/* Cases turn toward the middle, like objects on a shelf. */
+.stage-item .cover-stage {
+  transition: transform 0.5s cubic-bezier(0.2, 0.8, 0.2, 1);
+  transform-style: preserve-3d;
+}
+
+.stage-item.is-center .cover-stage {
+  transform: rotateY(-10deg) rotateX(3deg);
+}
+
+.stage-item.is-left .cover-stage {
+  transform: rotateY(28deg);
+}
+
+.stage-item.is-right .cover-stage {
+  transform: rotateY(-28deg);
+}
+
+.stage-item.is-center .stage-float {
+  animation: stage-float 5s ease-in-out infinite;
+}
+
+@keyframes stage-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+.stage-item.is-center:hover .disc-slot {
+  transform: translateX(5%);
+}
+
+.cover-release-picker {
+  font-size: 11px;
+  font-family: var(--mono);
+  max-width: 86%;
+  margin-right: 14%;
+}
+
+.disc-label::after {
+  background: var(--stage-bg);
+}
+
+.stage-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 24px 70px;
+  text-align: center;
+}
+
+.stage-info .focus-release {
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.stage-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--pill-text);
+  background: var(--pill-bg);
+  border: none;
+  border-radius: 7px;
+  padding: 4px 10px;
+  box-shadow:
+    0 1px 0 rgb(0 0 0 / 0.12),
+    0 2px 6px rgb(0 0 0 / 0.08);
+}
+
+.stage-pill:disabled {
+  opacity: 0.45;
+}
+
+.pill-key {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.85;
+  flex-shrink: 0;
+}
+
+.stage-title {
+  padding: 5px 12px;
+}
+
+.stage-title .song-title {
+  font-size: 15px;
+}
+
+.stage-title .title-button,
+.stage-title .title-input,
+.stage-info .focus-release {
+  font-weight: normal;
+}
+
+.stage-title .title-input {
+  font-family: var(--mono);
+  font-size: 14px;
+  min-width: 220px;
+}
+
+.stage-info .focus-file {
+  font-family: var(--mono);
+}
+
+.stage-info .focus-status {
+  margin-top: 2px;
+}
+
+.stage-info .status {
+  font-family: var(--mono);
+  background: var(--pill-bg);
+  border-color: transparent;
+}
+
+.stage-info .focus-details {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 12px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.stage-info .next-note {
+  margin: 4px 0 0;
+  font-size: 12px;
+  max-width: 460px;
+}
+
+.stage-dots {
+  position: absolute;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+}
+
+.stage-dots .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--stage-dot);
+}
+
+.stage-dots .dot.active {
+  background: var(--text);
+}
+
+.stage-corner {
+  position: absolute;
+  bottom: 12px;
+  display: flex;
+  gap: 6px;
+}
+
+.stage-corner.left {
+  left: 12px;
+}
+
+.stage-corner.right {
+  right: 12px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stage-item,
+  .stage-item .cover-stage {
+    transition: none;
+  }
+  .stage-item.is-center .stage-float {
+    animation: none;
+  }
+}
+
+.pixel-bar {
+  display: inline-flex;
+  gap: 2px;
+  vertical-align: middle;
+}
+
+.pixel-bar .cell {
+  width: 8px;
+  height: 12px;
+  border-radius: 1px;
+  background: var(--stage-dot);
+}
+
+.pixel-bar .cell.on {
+  background: var(--text);
+}
+
+.pixel-bar.small {
+  gap: 1px;
+}
+
+.pixel-bar.small .cell {
+  width: 5px;
+  height: 6px;
+}
+
+.pixel-bar.small .cell.on {
+  background: var(--muted);
+}
+
+.song-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.song-progress-value {
+  min-width: 4ch;
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+
+.release-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 4px;
 }

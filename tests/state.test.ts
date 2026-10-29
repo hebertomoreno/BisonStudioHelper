@@ -26,10 +26,9 @@ describe('StateStore', () => {
     const written = JSON.parse(await readFile(file, 'utf8'))
     expect(written.roots.map((r: { label: string }) => r.label)).toEqual(['Documents', 'Feather'])
     expect(written.roots[0].path).toBe('/Users/tester/Documents/Songs')
-    expect(written.roots[1].folders['Emi Folder']).toEqual({ release: 'Emi Folder' })
-    expect(written.releases.find((r: { name: string }) => r.name === 'Nikolas Murdock Demo 2021').released).toBe(
-      true
-    )
+    expect(written.roots[1].foldersPath).toBe('Projects')
+    // Releases live in releases.json.
+    expect(written.releases).toBeUndefined()
     expect(store.warnings).toEqual([])
   })
 
@@ -75,7 +74,7 @@ describe('SettingsPatchSchema', () => {
 
   it('rejects relative root paths', () => {
     const result = SettingsPatchSchema.safeParse({
-      roots: [{ path: 'Songs', label: 'Songs', maxDepth: 6, exclude: [], folders: {} }]
+      roots: [{ path: 'Songs', label: 'Songs', maxDepth: 6, exclude: [] }]
     })
     expect(result.success).toBe(false)
   })

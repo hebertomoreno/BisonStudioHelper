@@ -1,15 +1,9 @@
 // Default app state for this user's machine (SPEC sections 0 and 2).
 import { join } from 'node:path'
-import type { AppState, Release } from '../shared/schema'
+import type { AppState } from '../shared/schema'
 
-function seedRelease(name: string, type: Release['type'], released: boolean, createdAt: string): Release {
-  return { name, type, released, targetDate: null, createdAt }
-}
-
-export function defaultState(home: string, now: Date = new Date()): AppState {
-  const createdAt = now.toISOString()
-  const linkedFolders = ['YearOfTheBrownBear', 'Filosofolk', 'The Forest', 'Emi Folder']
-
+// Releases are seeded separately, in releases.json (src/main/releases.ts).
+export function defaultState(home: string): AppState {
   return {
     schemaVersion: 1,
     roots: [
@@ -24,23 +18,16 @@ export function defaultState(home: string, now: Date = new Date()): AppState {
           'MaxForLive',
           'Exported Songs (2019-2020)',
           'Nikolas Murdock Demo 2021'
-        ],
-        folders: {}
+        ]
       },
       {
         path: '/Volumes/Feather/Songs',
         label: 'Feather',
         maxDepth: 6,
         exclude: [],
-        foldersPath: 'Projects',
-        folders: Object.fromEntries(linkedFolders.map((name) => [name, { release: name }]))
+        foldersPath: 'Projects'
       }
     ],
-    releases: [
-      ...linkedFolders.map((name) => seedRelease(name, 'other', false, createdAt)),
-      seedRelease('Nikolas Murdock Demo 2021', 'EP', true, createdAt)
-    ],
-    tracklists: {},
     focusCap: 3,
     lanes: {},
     order: { focus: [], queue: [] },
@@ -57,6 +44,7 @@ export function defaultState(home: string, now: Date = new Date()): AppState {
       '/Volumes/Feather/Bounces'
     ],
     inbox: { ignored: [], matchThreshold: 60 },
+    progressWeights: { idea: 0, demo: 0.25, 'in production': 0.55, mixing: 0.8, finished: 1 },
     staleness: { amberDays: 7, redDays: 21 },
     excitementScale: [
       { value: 1, emoji: '😐', label: 'Not feeling it' },

@@ -42,10 +42,8 @@ export const SidecarSchema = z
     collect: z.object({}).passthrough().nullable().default(null),
     pinnedBounce: z.string().nullable().default(null),
     linkedBounces: z.array(z.object({ path: z.string(), linkedAt: z.string() })).default([]),
-    copiedBounces: z.array(z.object({}).passthrough()).default([]),
-    releases: z.array(z.string()).default([]),
-    primaryRelease: z.string().nullable().default(null),
-    releaseSource: z.enum(['folder', 'user']).nullable().default(null)
+    copiedBounces: z.array(z.object({}).passthrough()).default([])
+    // Release membership lives in releases.json, not here (SPEC 8b).
   })
   .passthrough()
 

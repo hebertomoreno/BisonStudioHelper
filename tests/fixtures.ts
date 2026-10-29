@@ -27,5 +27,5 @@ export async function makeSymlink(target: string, link: string): Promise<void> {
 }
 
 export function root(path: string, overrides: Partial<Root> = {}): Root {
-  return { path, label: 'Test', maxDepth: 6, exclude: [], folders: {}, ...overrides }
+  return { path, label: 'Test', maxDepth: 6, exclude: [], ...overrides }
 }

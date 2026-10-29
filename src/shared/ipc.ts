@@ -12,6 +12,9 @@ export const IPC = {
   setLane: 'library:setLane',
   reorder: 'library:reorder',
   setQueueSort: 'library:setQueueSort',
+  addSongToRelease: 'release:addSong',
+  setTitle: 'song:setTitle',
+  pickReleaseArt: 'release:pickArt',
   // main → renderer push
   libraryChanged: 'library:changed'
 } as const
@@ -44,6 +47,10 @@ export interface FinisherApi {
   setLane(ids: string[], lane: Lane, bumpToQueue?: string[]): Promise<SetLaneResult>
   reorder(lane: 'focus' | 'queue', ids: string[]): Promise<void>
   setQueueSort(sort: QueueSort): Promise<void>
+  addSongToRelease(songId: string, releaseId: string): Promise<void>
+  setTitle(songId: string, title: string): Promise<void>
+  // Opens an image picker and stores the chosen file as the release's cover. False if cancelled.
+  pickReleaseArt(releaseId: string): Promise<boolean>
   // Returns an unsubscribe function.
   onLibraryChanged(listener: (snapshot: LibrarySnapshot) => void): () => void
 }

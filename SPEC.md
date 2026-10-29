@@ -130,17 +130,13 @@ Source of truth for per-song data is a sidecar file inside each project folder, 
   "linkedBounces": [{ "path": "/abs/path/to/file.mp3", "linkedAt": "..." }],
   "copiedBounces": [
     { "file": "Song v3.mp3", "copiedFrom": "/abs/inbox/Song v3.mp3", "sourceMtime": "...", "sourceSize": 6613440, "copiedAt": "..." }
-  ],
-  "releases": ["Night Swim EP"],
-  "primaryRelease": "Night Swim EP",
-  "releaseSource": "folder | user"
+  ]
 }
 ```
 
 - `mainAls`: filename of a user-pinned main set, relative to the project folder (so it survives moves). `null` = use the newest `.als`.
 - `aliases`: extra names used by inbox matching (7b).
-- `primaryRelease`: the release shown first on the card when a song has several.
-- `releaseSource`: `"folder"` when the release was inferred from a release folder (8b), until the user edits it.
+- The sidecar holds nothing about releases. Release membership lives in `releases.json` (8b), so moving, relinking or renaming a release never rewrites song folders.
 - All timestamps are ISO 8601 with the local offset.
 
 App-level state lives in `app.getPath('userData')/state.json`:
@@ -158,23 +154,9 @@ App-level state lives in `app.getPath('userData')/state.json`:
       "path": "/Volumes/Feather/Songs", "label": "Feather",
       "maxDepth": 6,
       "foldersPath": "Projects",
-      "folders": {
-        "YearOfTheBrownBear": { "release": "YearOfTheBrownBear" },
-        "Filosofolk": { "release": "Filosofolk" },
-        "The Forest": { "release": "The Forest" },
-        "Emi Folder": { "release": "Emi Folder" }
-      },
       "exclude": []
     }
   ],
-  "releases": [
-    { "name": "YearOfTheBrownBear", "type": "other", "released": false, "targetDate": null, "createdAt": "..." },
-    { "name": "Filosofolk", "type": "other", "released": false, "targetDate": null, "createdAt": "..." },
-    { "name": "The Forest", "type": "other", "released": false, "targetDate": null, "createdAt": "..." },
-    { "name": "Emi Folder", "type": "other", "released": false, "targetDate": null, "createdAt": "..." },
-    { "name": "Nikolas Murdock Demo 2021", "type": "EP", "released": true, "targetDate": null, "createdAt": "..." }
-  ],
-  "tracklists": { "Night Swim EP": ["songId", "songId"] },
   "focusCap": 3,
   "lanes": { "<songId>": "focus | queue | shelf" },
   "order": { "focus": ["id", "id"], "queue": ["id"] },
@@ -191,6 +173,7 @@ App-level state lives in `app.getPath('userData')/state.json`:
     "/Volumes/Feather/Bounces"
   ],
   "inbox": { "ignored": ["/abs/path", "..."], "matchThreshold": 60 },
+  "progressWeights": { "idea": 0, "demo": 0.25, "in production": 0.55, "mixing": 0.8, "finished": 1 },
   "staleness": { "amberDays": 7, "redDays": 21 },
   "excitementScale": [{ "value": 1, "emoji": "😐", "label": "Not feeling it" }],
   "savedFilters": [{ "name": "Demos I'm excited about", "filter": { "status": ["demo"], "excitementMin": 4 } }],
@@ -199,7 +182,7 @@ App-level state lives in `app.getPath('userData')/state.json`:
     "<songId>": {
       "path": "/abs/path/Song Project", "rootPath": "/Volumes/Feather/Songs", "folder": "Rough Ideas",
       "title": "...", "status": "demo", "excitement": 4, "latestNext": "...",
-      "lastWorkedAt": "...", "collectState": "collected", "releases": ["..."], "seenAt": "...",
+      "lastWorkedAt": "...", "collectState": "collected", "seenAt": "...",
       "notFound": false
     }
   },
@@ -212,8 +195,33 @@ The values above are the defaults for this user's machine (section 0); `<user>` 
 
 - `songCache` is a read-only copy of each song's display data, refreshed on every scan. It is what the app shows for songs whose drive is not mounted, since their sidecar is unreadable then. `notFound` is set when the drive was mounted but the folder was missing from the last scan.
 - `songFlags`: the "New" and "Duplicate of" tags (sections 1 and 3).
-- `pendingSidecarEdits`: sidecar changes that could not be written because the drive was unmounted (release renames and deletes, 8b). They are applied when the drive mounts.
-- `folders`: first-level folders under a root's `foldersPath` that are linked to a release. A folder not listed here is a plain folder. The seed values above are this user's current choices (section 0).
+- `pendingSidecarEdits`: sidecar changes that could not be written because the drive was unmounted. They are applied when the drive mounts. (Releases no longer need this, since they are not stored in sidecars.)
+
+The release database lives in its own file, `app.getPath('userData')/releases.json` (section 8b):
+
+```json
+{
+  "schemaVersion": 1,
+  "releases": [
+    {
+      "id": "uuid",
+      "name": "Filosofolk",
+      "type": "single | EP | album | other",
+      "released": false,
+      "targetDate": "2027-03-01",
+      "art": "uuid.png",
+      "folder": { "rootPath": "/Volumes/Feather/Songs", "path": "Projects/Filosofolk" },
+      "added": ["<songId from outside the folder>"],
+      "excluded": ["<songId inside the folder that is not on the release>"],
+      "plannedTracks": null,
+      "order": ["songId", "songId"],
+      "createdAt": "..."
+    }
+  ]
+}
+```
+
+It is seeded with `YearOfTheBrownBear`, `Filosofolk`, `The Forest` and `Emi Folder` (each pointing at `Projects/<name>` on Feather) and `Nikolas Murdock Demo 2021` (released, no folder). A `state.json` from before this file existed has its `releases`, `roots[].folders` and `tracklists` migrated into it once. If `releases.json` cannot be read, it is moved aside as `releases.json.corrupt-<ts>`, never overwritten.
 
 Writes must be atomic: write to `.finisher.json.tmp`, then `fs.rename`. Never modify `.als` files.
 
@@ -386,6 +394,51 @@ Decisions are never applied automatically, even for high scores. The user confir
 
 ---
 
+## 7c. Work sessions from saves (step 5)
+
+Sessions are also counted without the user doing anything, from `.als` saves. This shows how much work has gone into a song, especially in long stages like mixing.
+
+**Sources of saves**
+- **Live's backups.** On every save, Live moves the previous version into the project's `Backup/` folder as `<Set name> [YYYY-MM-DD HHMMSS].als`, keeping the last 10 per set. The timestamp in the file name is the save time; trust it over file mtimes. Read only the names; never open or change these files.
+- **The save log.** From now on, the watcher records every `.als` save in the project root (an add or change event on an `.als` file, after its size settles) with the set name and time. Skip `Backup/`, which is already excluded from scanning.
+- **Current `.als` mtimes**, only when they are newer than every backup timestamp for that set.
+- **Bulk-copy guard.** File mtimes can come from copying, not working: several YearOfTheBrownBear sets carry the same 2026-07-09 mtime. Ignore a mtime-based save when more than 3 projects share the same mtime minute. Backup names and live watcher events are never ignored.
+- **"Open in Live" sessions** (section 7) also count, so a session where the user listens or tweaks without saving still shows up.
+
+**Storage.** Saves go in `app.getPath('userData')/activity.json`, keyed by song id. Nothing is written into project folders.
+
+```json
+{
+  "schemaVersion": 1,
+  "saves": {
+    "<songId>": [
+      { "at": "2026-10-08T17:41:15-06:00", "set": "WeAreNotToBlame", "source": "backup | watcher | mtime" }
+    ]
+  },
+  "importedBackups": { "<songId>": "2026-10-20T13:47:54-06:00" }
+}
+```
+
+- Each scan imports backup timestamps newer than `importedBackups[songId]`. Saves are deduplicated by set and time (within 2 seconds), since a watcher save shows up later as a backup too.
+- The first scan imports all existing backups, so songs start with real history. Surveyed 2026-10-29: 24 of Feather's 89 projects already show 5 or more sessions (WeAreNotToBlame 11, A WATERFALL 10, Boxing2 8).
+- Songs on an unmounted drive keep their history; only new saves wait for the drive.
+
+**Sessions**
+- Saves less than 3 hours apart (`sessionGapHours`, in state) form one session. Its span is from the first save to the last; one save alone is a session with no length.
+- An explicit session (section 7) that overlaps an inferred one replaces it, keeping the inferred saves as detail. Explicit sessions carry notes and "next"; inferred ones don't.
+- Approximate time = sum of session spans. Show it as "about 6 h", never more precise, since time before the first save in a session is unknown.
+
+**Shown**
+- Song card: "11 sessions · last 3 days ago".
+- **Sessions in the current stage**: sessions since the song's latest `statusHistory` entry, e.g. "Mixing · 6 sessions over 5 weeks". The count starts again on each status change.
+- Song detail: session list (date, number of saves, approximate length, notes if explicit) and sessions per status on the status timeline.
+- Release (8b/8c): sessions this month across its songs, next to the progress bar, so a stuck release can be told apart from one that is moving.
+- Sort and filter: "most sessions", "no session in N days".
+
+**Limits.** Only saves and "Open in Live" are seen. Work done without saving, in a set not opened through the app, is invisible.
+
+---
+
 ## 8. Status and history
 
 - Status control on each card (dropdown or arrow buttons). Each change appends to `statusHistory`.
@@ -427,33 +480,75 @@ Emoji set and labels are configurable in Settings (`excitementScale`).
 
 ## 8b. Releases and folders
 
-Releases and folders are separate things:
+Releases and folders are separate things, and the link between them is kept in one place: the release database (`releases.json`, section 2).
 
-- A **folder** is a place on disk. Each first-level folder under a root's `foldersPath` (Feather: `Projects/`) is a folder, e.g. `Rough Ideas/`. Folders are discovered by the scan and shown as a label on song cards.
-- A **release** is a named group of songs (single, EP, album, or other), stored in app state (`releases`). A song's sidecar holds the release names it belongs to.
-- A folder can be **linked to a release** (`roots[].folders`), or not. Every song inside a linked folder, at any depth, belongs to that release. Unlinked folders are plain folders.
+- A **folder** is a place on disk. Each first-level folder under a root's `foldersPath` (Feather: `Projects/`) is a folder, e.g. `Rough Ideas/`. Folders are discovered by the scan and shown as a label on song cards. Folders know nothing about releases.
+- A **release** is a record in the release database: name, type, released flag, prospective release date (`targetDate`), cover art, and optionally a pointer to one folder (`folder`: root path + path relative to the root).
+- Song sidecars hold nothing about releases. Renaming, relinking or deleting a release only changes `releases.json`, works while Feather is unplugged, and never writes to a song folder.
 - New folders found by the scan are plain folders. They are never turned into releases automatically.
 
-Current setup (section 0): `YearOfTheBrownBear`, `Filosofolk`, `The Forest`, and `Emi Folder` are linked to releases of the same name. All other Feather folders are plain folders. `Nikolas Murdock Demo 2021` is a release marked released, with no folder.
+**Membership.** A song is on a release when:
+1. its project folder is under the release's `folder`, at any depth, and its id is not in `excluded`; or
+2. its id is in `added` (songs from elsewhere, e.g. a Documents project that belongs on the album).
+
+`excluded` is how sketches and old versions inside a release folder are kept off the release (YearOfTheBrownBear holds 14 projects, not all of them album tracks). Adding an excluded song back removes it from `excluded`. Songs are matched by sidecar id, so a project renamed inside the folder stays on the release; a project moved out of the folder leaves it unless it is in `added`.
+
+A song can be on several releases (a single that is also on the album). Its card shows the folder release first.
+
+**Folder pointer health.** When the release's root is mounted and the folder does not exist (renamed in Finder), the release shows "Folder not found" with a "Choose folder…" action to repoint it. Its folder members are then empty, but `added`, `excluded` and `order` are kept, so repointing restores everything.
+
+Current setup (section 0): `YearOfTheBrownBear`, `Filosofolk`, `The Forest`, and `Emi Folder` point at their Feather folders. `Nikolas Murdock Demo 2021` is a released release with no folder.
 
 **Releases**
-- Release fields: `name`, `type` (single / EP / album / other), `released` (checkbox: the release is out, so it is old), `targetDate` (optional).
-- A song can be tagged with several releases (e.g. a single that is also on an album). One of them is the `primaryRelease`, shown first on the card. With one release, it is the primary automatically.
-- Create, rename, and delete releases in the Releases view.
-- A song inside a linked folder with no `releases` in its sidecar gets that release, with `releaseSource: "folder"`. The UI marks it "from folder" until the user edits it.
-- If a song's `primaryRelease` differs from the release of the linked folder it sits in, show a mismatch badge with one option: change the tag to match the folder. (Moving the folder is out of scope for now, section 12.)
+- Fields: `name`, `type` (single / EP / album / other), `released` (checkbox: the release is out, so it is old), `targetDate` (optional, prospective release date), `art`.
+- **Cover art**: one image per release. The user picks a JPEG, PNG, WebP or GIF; the app copies it into `userData/art/<uuid>.<ext>` and serves it through an `art://` protocol that only accepts those generated names. Release folders are never written. Replacing a cover deletes the old copy.
+- Song cards show the first release's cover, or a colored placeholder with the release's (or song's) initials. Hovering the cover offers "Add cover" / "Change cover". A song on no release gets an "Add to release…" picker under the cover, which puts it in that release's `added`.
+- Create, rename, repoint and delete releases in the Releases view. Deleting a release removes only its record and its art copy; folders and songs are untouched.
 - Released releases are listed below unreleased ones, collapsed by default. Their songs are not hidden from the main lists, but can be filtered out with "Hide released".
 
-**Renaming and deleting**
-- **Renaming** a release updates the sidecar of every song tagged with it and the folder link. Folders on disk are never renamed. Songs on an unmounted drive get a `pendingSidecarEdits` entry, applied when the drive mounts.
-- **Deleting** a release removes the tag from songs (queued the same way for unmounted drives) and unlinks any folder, which becomes a plain folder. Folders on disk are not touched.
-- Linking or unlinking a folder is done from the Releases view. Unlinking leaves existing song tags as they are.
-
 **UI**
-- Releases view, **Releases** tab: one row per release with type, released checkbox, target date, linked folder (if any), song count, and how many songs are at each status (e.g. "2 finished, 1 mixing, 1 demo"). Opening a release lists its songs with status, excitement, collect badge, last bounce, and play button. Songs can be reordered within a release (tracklist order, `tracklists` in app state).
-- Releases view, **Folders** tab: one row per folder with its root, song count, and a control to link it to a release (existing or new) or unlink it.
-- Song card and song detail show release tags and the location label (section 3). Tags are edited from song detail with an autocomplete over existing releases.
+- Releases view, **Releases** tab: one row per release with cover, type, released checkbox, target date, folder (if any), song count, and the progress bar (8c). Opening a release lists its songs in tracklist order with status, excitement, collect badge, last bounce, and play button. Songs can be dragged to reorder (`order`), and each folder song has "Not on this release" (adds to `excluded`). An "Excluded" group at the bottom lists them with "Put back".
+- Releases view, **Folders** tab: one row per folder with its root, song count, and the release pointing at it (if any), with "Make a release from this folder" or "Point a release here".
+- Song detail shows the song's releases and lets the user add it to or take it off a release.
 - Filter by release, by folder, and "Hide released" in Main list, Board, and Shelf.
+
+## 8c. Release progress (planned)
+
+The app's main job is showing how close a song, and a release, is to done. This section turns song statuses into a progress estimate for a release.
+
+**Song progress.** Each status has a weight (`progressWeights` in state, editable in Settings). The user confirmed these as the starting values (mixing really is about 80% of the way) and may tune them once the app is in use:
+
+| Status | Weight |
+|---|---|
+| idea | 0 |
+| demo | 0.25 |
+| in production | 0.55 |
+| mixing | 0.8 |
+| finished | 1.0 |
+
+`finished` is set by hand and always counts as 1.0. There is no automatic check against bounces or saves.
+
+**Release progress.**
+- `progress = sum(song weights) / max(member count, plannedTracks)`. Each song weighs the same.
+- `plannedTracks` (optional, on the release) covers tracks that don't exist yet: an EP planned at 5 songs with 3 projects reads "3 of 5 tracks exist", and the 2 missing slots count as 0. The count varies per release and changes over time, so it is set and edited where songs are added to a release (release detail, and the "Add to release…" flow), not fixed when the release is created. Unset means the member count is the plan.
+- Shown as a percentage and a stacked bar with one segment per status (e.g. "2 finished, 1 mixing, 3 demo").
+
+**Momentum and forecast.** From the members' `statusHistory`:
+- Rebuild the release's progress on each day a member changed status, giving a progress-over-time line (drawn in the release detail).
+- Velocity = progress gained in the last 6 weeks, per week.
+- Forecast finish = today + (1 − progress) / velocity. With a `targetDate`, show "On track", "About N weeks behind", or "Ahead". With no status change in 6 weeks, show "Stalled since <date>" instead of a forecast. With fewer than 2 changes ever, show "Not enough history yet".
+- This is a rough guide, labeled "estimate", never a promise.
+
+**What's holding it back.** Under the bar, list up to three songs that cost the release the most: the lowest-weight songs first, then songs whose last-worked date is red (section 4). Each has "Move to Focus".
+
+**Where it shows.**
+- Releases view rows: percentage, stacked bar, forecast line.
+- Release detail: the same, plus the progress-over-time line and the per-song list.
+- Focus stage (built): a 20-cell pixel bar for the selected song (status pill, bar, percentage), and a small bar under the release name with the release's percentage and song count ("3 of 5 tracks" when `plannedTracks` is higher). Hovering the release bar shows the status breakdown.
+
+**Offline.** `songCache` keeps each song's `statusHistory`, so releases on an unplugged Feather still show their progress (marked "as of <last scan>").
+
+**Starting point.** Every existing song starts as `idea`, so every release reads 0% until statuses are set. The release detail has a quick status picker per song to make that first pass fast.
 
 ---
 
@@ -465,8 +560,8 @@ Current setup (section 0): `YearOfTheBrownBear`, `Filosofolk`, `The Forest`, and
    - Filters: status, excitement, release, folder, location (Documents / Feather), has/no bounce, hide released, saved filters.
 2. **Board**: status columns (section 8), with the same filters.
 3. **Shelf**: grid/list of shelved songs with search by title, the same filters, sort by excitement or last worked, multi-select, "Bring to queue" and "Bring to focus" buttons, and the "Rate" prompt for unrated songs. Newly discovered projects show a "New" tag; duplicates show "Duplicate of <title>".
-4. **Song detail**: tasks checklist, session log, status timeline, excitement chart, release tags, bounces (own, wrapper, linked), collect report (including other sets), main `.als` picker, mismatch badge.
-5. **Releases**: Releases tab and Folders tab (section 8b).
+4. **Song detail**: tasks checklist, session log, status timeline, excitement chart, release tags, bounces (own, wrapper, linked), collect report (including other sets), main `.als` picker.
+5. **Releases**: Releases tab and Folders tab (section 8b), with progress (8c).
 6. **Inbox**: bounce inbox (section 7b).
 7. **Settings**: song roots (path, label, max depth, exclude list, folders path), bounce folder names, inbox paths, ignored inbox items, match threshold, focus cap, Live app name, allowed external roots, staleness thresholds, excitement scale.
 
@@ -480,9 +575,10 @@ Current setup (section 0): `YearOfTheBrownBear`, `Filosofolk`, `The Forest`, and
 4. Sessions (end modal, notes, next), last-worked calculation.
 4a. Bounce folder detection (name variants, wrappers, loose files), custom protocol, player bar (section 7a).
 4b. Bounce inbox: iCloud placeholders, matching, copy/move/link/ignore, linked bounces, aliases (section 7b).
-5. Status + history + board view. Excitement rating + history + filters/sort (section 8a).
+5. Status + history + board view. Excitement rating + history + filters/sort (section 8a). Work sessions from saves: backup import, save log, sessions, sessions in the current stage (section 7c).
 6. `.als` parser and collect detection, with fixture tests (section 5).
-6a. Folders, releases (with released flag), folder links, pending sidecar edits (sections 3, 8b).
+6a. Releases view: release database (done: `releases.json`, folder pointers, art), create/rename/repoint/delete, membership (exclude, add, order), Folders tab (section 8b).
+6b. Release progress: weights, planned track count, progress bar, forecast, holding-back list (section 8c). Needs step 5 (statuses).
 7. Full Shelf view: search, filters, Rate prompt.
 8. Packaging with `electron-builder` for macOS.
 
@@ -506,4 +602,4 @@ Current setup (section 0): `YearOfTheBrownBear`, `Filosofolk`, `The Forest`, and
   - Never merge into an existing destination.
 - **Samples browser.** A visual way to browse `~/Documents/Songs/Samples/`, the user's sample library. Excluded from song scanning until then.
 - **Versions of one song.** Grouping same-name projects (e.g. the three GimmeTheSign projects) as versions of one song.
-- **Lanes on another Mac.** Lanes, order, releases, and folder links live in `state.json` on this Mac only.
+- **Lanes on another Mac.** Lanes and order live in `state.json`, and releases in `releases.json`, on this Mac only.

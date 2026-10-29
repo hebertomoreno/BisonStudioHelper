@@ -50,7 +50,6 @@ function RootCard({ root, status, onChange, onRemove }: RootCardProps): JSX.Elem
     const picked = await window.finisher.pickFolder({ title: 'Choose song folder', defaultPath: root.path })
     if (picked) onChange({ ...root, path: picked })
   }
-  const linked = Object.keys(root.folders)
 
   return (
     <div className="card">
@@ -97,11 +96,6 @@ function RootCard({ root, status, onChange, onRemove }: RootCardProps): JSX.Elem
           onChange={(exclude) => onChange({ ...root, exclude })}
         />
       </div>
-      {linked.length > 0 && (
-        <p className="muted hint">
-          Folders linked to releases: {linked.join(', ')}. Edit links in Releases (coming in step 6a).
-        </p>
-      )}
     </div>
   )
 }
@@ -161,7 +155,7 @@ export function SettingsView(): JSX.Element {
   async function addRoot(): Promise<void> {
     const picked = await window.finisher.pickFolder({ title: 'Add song folder' })
     if (!picked || draft!.roots.some((r) => r.path === picked)) return
-    update('roots', [...draft!.roots, { path: picked, label: basename(picked), maxDepth: 6, exclude: [], folders: {} }])
+    update('roots', [...draft!.roots, { path: picked, label: basename(picked), maxDepth: 6, exclude: [] }])
   }
 
   async function save(): Promise<void> {

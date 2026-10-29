@@ -1,4 +1,6 @@
 import type { LibrarySnapshot, QueueSort, SongSummary } from '../../../shared/songs'
+import { FocusStage } from '../components/FocusStage'
+import { PlayButton } from '../components/Player'
 import { ReorderList } from '../components/ReorderList'
 import { LastWorked, Location, RootNotices, SongTags, StatusPill } from '../components/SongBits'
 import { useLaneMover } from '../components/useLaneMover'
@@ -37,13 +39,11 @@ export function MainListView({ snapshot }: { snapshot: LibrarySnapshot }): JSX.E
       {focus.length === 0 ? (
         <p className="empty">Nothing in Focus. Move up to {snapshot.focusCap} songs here from the Queue or the Shelf.</p>
       ) : (
-        <ReorderList
-          className="focus-list"
-          items={focus}
+        <FocusStage
+          songs={focus}
+          snapshot={snapshot}
+          onMove={move}
           onReorder={(ids) => void window.finisher.reorder('focus', ids)}
-          renderItem={(song, controls) => (
-            <FocusCard song={song} snapshot={snapshot} controls={controls} onMove={move} />
-          )}
         />
       )}
 
@@ -89,31 +89,12 @@ interface RowProps {
   onMove: ReturnType<typeof useLaneMover>['move']
 }
 
-function FocusCard({ song, snapshot, controls, onMove }: RowProps): JSX.Element {
-  return (
-    <article className="focus-card">
-      <div className="focus-card-top">
-        <h3>{song.title}</h3>
-        {controls}
-      </div>
-      <div className="meta">
-        <Location song={song} />
-        <StatusPill song={song} />
-        <LastWorked song={song} thresholds={snapshot.staleness} />
-        <SongTags song={song} />
-      </div>
-      {song.latestNext && <p className="next-note">Next: {song.latestNext}</p>}
-      <div className="row-actions">
-        <button onClick={() => onMove([song.id], 'queue')}>Move to Queue</button>
-        <button onClick={() => onMove([song.id], 'shelf')}>Move to Shelf</button>
-      </div>
-    </article>
-  )
-}
-
 function QueueRow({ song, snapshot, controls, onMove }: RowProps): JSX.Element {
   return (
     <div className="queue-row">
+      <span className="queue-play">
+        <PlayButton song={song} className="small" />
+      </span>
       <span className="queue-title">{song.title}</span>
       <Location song={song} />
       <StatusPill song={song} />

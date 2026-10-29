@@ -1,4 +1,6 @@
+import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
+import { extname, join } from 'node:path'
 import { BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { ZodError } from 'zod'
 import { SettingsPatchSchema } from '../shared/schema'
@@ -11,10 +13,13 @@ import {
 } from '../shared/ipc'
 import type { Lane, QueueSort, SetLaneResult } from '../shared/songs'
 import type { Library } from './library'
+import type { ReleaseStore } from './releases'
 import { formatZodError, pickSettings, type StateStore } from './state'
 
 const LANES: Lane[] = ['focus', 'queue', 'shelf']
 const QUEUE_SORTS: QueueSort[] = ['lastWorked', 'excitement', 'manual']
+const ART_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'gif']
+const MAX_ART_BYTES = 25 * 1024 * 1024
 
 function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []
@@ -37,7 +42,13 @@ function handle<Args extends unknown[], Result>(
   })
 }
 
-export function registerIpc(store: StateStore, library: Library, onSettingsSaved: () => void): void {
+export function registerIpc(
+  store: StateStore,
+  library: Library,
+  releases: ReleaseStore,
+  artDir: string,
+  onSettingsSaved: () => void
+): void {
   handle(IPC.getLibrary, () => library.snapshot())
 
   handle(IPC.rescan, () => library.scan())
@@ -55,6 +66,43 @@ export function registerIpc(store: StateStore, library: Library, onSettingsSaved
   handle(IPC.setQueueSort, (_event, sort: unknown) => {
     if (!QUEUE_SORTS.includes(sort as QueueSort)) throw new Error(`Unknown sort: ${String(sort)}`)
     return library.setQueueSort(sort as QueueSort)
+  })
+
+  handle(IPC.addSongToRelease, (_event, songId: unknown, releaseId: unknown) => {
+    if (typeof songId !== 'string' || typeof releaseId !== 'string') throw new Error('Invalid song or release')
+    return library.addSongToRelease(songId, releaseId)
+  })
+
+  handle(IPC.setTitle, (_event, songId: unknown, title: unknown) => {
+    if (typeof songId !== 'string' || typeof title !== 'string') throw new Error('Invalid song or title')
+    return library.setTitle(songId, title)
+  })
+
+  // Copies the chosen image into the app's art folder; project and release folders are never written.
+  handle(IPC.pickReleaseArt, async (event, releaseId: unknown): Promise<boolean> => {
+    const release = typeof releaseId === 'string' ? releases.find(releaseId) : undefined
+    if (!release) throw new Error('Unknown release')
+    const window = BrowserWindow.fromWebContents(event.sender)
+    const dialogOptions: Electron.OpenDialogOptions = {
+      title: `Cover for ${release.name}`,
+      properties: ['openFile'],
+      filters: [{ name: 'Images', extensions: ART_EXTENSIONS }]
+    }
+    const result = window
+      ? await dialog.showOpenDialog(window, dialogOptions)
+      : await dialog.showOpenDialog(dialogOptions)
+    if (result.canceled || result.filePaths.length === 0) return false
+
+    const source = result.filePaths[0]
+    const ext = extname(source).slice(1).toLowerCase()
+    if (!ART_EXTENSIONS.includes(ext)) throw new Error('Choose a JPEG, PNG, WebP or GIF image')
+    if ((await fs.stat(source)).size > MAX_ART_BYTES) throw new Error('That image is over 25 MB')
+    const name = `${randomUUID()}.${ext}`
+    await fs.mkdir(artDir, { recursive: true })
+    await fs.copyFile(source, join(artDir, name))
+    const previous = await library.setReleaseArt(release.id, name)
+    if (previous) await fs.rm(join(artDir, previous), { force: true })
+    return true
   })
 
   handle(IPC.getSettings, (): SettingsResult => ({

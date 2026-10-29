@@ -14,15 +14,59 @@ export type Availability =
   // .finisher.json exists but could not be read; the app leaves it untouched.
   | 'invalid-sidecar'
 
+// Custom-scheme URLs served by main (src/main/media.ts).
+export const bounceUrl = (fileId: string): string => `bounce://file/${fileId}`
+export const artUrl = (fileName: string): string => `art://file/${encodeURIComponent(fileName)}`
+
+export interface SongRelease {
+  id: string
+  name: string
+  // Inferred from the linked folder the song sits in, not tagged by the user (SPEC 8b).
+  fromFolder: boolean
+  released: boolean
+  artUrl: string | null
+}
+
+export interface BouncePreview {
+  name: string
+  // ISO date of the newest file in the bounce.
+  bouncedAt: string
+  // Null when the bounce only exists as AIFF, which Chromium cannot play.
+  url: string | null
+  format: string | null
+}
+
+export interface ReleaseProgress {
+  // 0 to 1: the songs' weights over max(song count, planned tracks).
+  value: number
+  songCount: number
+  plannedTracks: number | null
+  byStatus: Partial<Record<Status, number>>
+}
+
+export interface ReleaseSummary {
+  id: string
+  name: string
+  type: string
+  released: boolean
+  artUrl: string | null
+  progress: ReleaseProgress
+}
+
 export interface SongSummary {
   id: string
+  // The song's name, set in the app. Starts as the project folder name.
   title: string
+  // The newest .als without the extension, e.g. "WeAreNotToBlameCopyToFinish".
+  setName: string | null
   path: string
   rootPath: string
   rootLabel: string
   // First-level folder under the root's foldersPath, e.g. "Rough Ideas".
   folder: string | null
   status: Status | null
+  // The status's weight, 0 to 1 (SPEC 8c). Null when the status is unknown.
+  progress: number | null
   excitement: number | null
   latestNext: string | null
   lastWorkedAt: string | null
@@ -31,6 +75,11 @@ export interface SongSummary {
   isNew: boolean
   duplicateOf: string | null
   error: string | null
+  // Primary release first.
+  releases: SongRelease[]
+  // Pinned bounce, else the newest. Null when there are none or the drive is not mounted.
+  preview: BouncePreview | null
+  bounceCount: number
 }
 
 export interface RootSummary {
@@ -48,6 +97,7 @@ export interface LibrarySnapshot {
   queueSort: QueueSort
   staleness: AppState['staleness']
   roots: RootSummary[]
+  releases: ReleaseSummary[]
   scanning: boolean
   lastScanAt: string | null
   warnings: string[]
