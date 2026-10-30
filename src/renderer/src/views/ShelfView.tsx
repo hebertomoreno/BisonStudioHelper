@@ -1,27 +1,38 @@
 import { useMemo, useState } from 'react'
-import type { LibrarySnapshot } from '../../../shared/songs'
-import { LastWorked, Location, RootNotices, SongTags, StatusPill } from '../components/SongBits'
+import type { LibrarySnapshot, SongSummary } from '../../../shared/songs'
+import { LastWorked, Location, RootNotices, SongTags } from '../components/SongBits'
+import { ExcitementPicker, StatusSelect, useSongEditor } from '../components/SongControls'
 import { useLaneMover } from '../components/useLaneMover'
+import { FilterBar } from '../components/FilterBar'
+import { EMPTY_FILTER, matchesFilter, type SongFilter } from '../lib/filters'
 import { byLastWorked, plural } from '../lib/songs'
 import { LibraryHeader } from './LibraryHeader'
 
-type ShelfSort = 'lastWorked' | 'title'
+type ShelfSort = 'lastWorked' | 'excitement' | 'sessions' | 'title'
+
+const SORTS: Record<ShelfSort, (a: SongSummary, b: SongSummary) => number> = {
+  lastWorked: byLastWorked,
+  excitement: (a, b) => (b.excitement ?? 0) - (a.excitement ?? 0) || byLastWorked(a, b),
+  sessions: (a, b) => b.sessions.count - a.sessions.count || byLastWorked(a, b),
+  title: (a, b) => a.title.localeCompare(b.title)
+}
 
 export function ShelfView({ snapshot }: { snapshot: LibrarySnapshot }): JSX.Element {
   const { move, dialog } = useLaneMover(snapshot)
+  const editor = useSongEditor()
   const [query, setQuery] = useState('')
-  const [rootFilter, setRootFilter] = useState<string>('all')
   const [sort, setSort] = useState<ShelfSort>('lastWorked')
+  const [filter, setFilter] = useState<SongFilter>(EMPTY_FILTER)
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
   const shelf = useMemo(() => {
     const q = query.trim().toLowerCase()
     return snapshot.songs
       .filter((s) => s.lane === 'shelf')
-      .filter((s) => rootFilter === 'all' || s.rootPath === rootFilter)
       .filter((s) => !q || s.title.toLowerCase().includes(q) || (s.folder ?? '').toLowerCase().includes(q))
-      .sort(sort === 'title' ? (a, b) => a.title.localeCompare(b.title) : byLastWorked)
-  }, [snapshot.songs, query, rootFilter, sort])
+      .filter((s) => matchesFilter(s, filter))
+      .sort(SORTS[sort])
+  }, [snapshot.songs, query, sort, filter])
 
   // Songs with an unreadable sidecar have no stable id and cannot change lanes.
   const movable = shelf.filter((s) => s.availability !== 'invalid-sidecar')
@@ -55,19 +66,14 @@ export function ShelfView({ snapshot }: { snapshot: LibrarySnapshot }): JSX.Elem
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
-        <select aria-label="Location" value={rootFilter} onChange={(e) => setRootFilter(e.target.value)}>
-          <option value="all">All locations</option>
-          {snapshot.roots.map((r) => (
-            <option key={r.path} value={r.path}>
-              {r.label}
-            </option>
-          ))}
-        </select>
         <select aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as ShelfSort)}>
           <option value="lastWorked">Last worked</option>
+          <option value="excitement">Excitement</option>
+          <option value="sessions">Most sessions</option>
           <option value="title">Title</option>
         </select>
       </div>
+      <FilterBar snapshot={snapshot} filter={filter} onChange={setFilter} />
 
       <div className="selection-bar">
         <label className="check-row">
@@ -106,7 +112,12 @@ export function ShelfView({ snapshot }: { snapshot: LibrarySnapshot }): JSX.Elem
                 />
                 <span className="queue-title">{song.title}</span>
                 <Location song={song} />
-                <StatusPill song={song} />
+                <StatusSelect song={song} onChange={(status) => void editor.setStatus(song, status)} />
+                <ExcitementPicker
+                  song={song}
+                  scale={snapshot.excitementScale}
+                  onPick={(value, note) => void editor.setExcitement(song, value, note)}
+                />
                 <LastWorked song={song} />
                 <SongTags song={song} />
               </li>
@@ -115,6 +126,7 @@ export function ShelfView({ snapshot }: { snapshot: LibrarySnapshot }): JSX.Elem
         </ul>
       )}
       {dialog}
+      {editor.dialog}
     </section>
   )
 }

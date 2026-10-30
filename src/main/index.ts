@@ -4,6 +4,7 @@ import { app, BrowserWindow, dialog } from 'electron'
 import { IPC } from '../shared/ipc'
 import { registerIpc } from './ipc'
 import { Library } from './library'
+import { ActivityStore } from './activity'
 import { defaultReleases, fromLegacy, ReleaseStore } from './releases'
 import { SelfWrites } from './sidecar'
 import { StateStore } from './state'
@@ -68,8 +69,11 @@ app.whenReady().then(async () => {
     return
   }
 
+  const activity = new ActivityStore(join(app.getPath('userData'), 'activity.json'))
+  await activity.load()
+
   const selfWrites = new SelfWrites()
-  const library = new Library(store, releases, selfWrites, () => {
+  const library = new Library(store, releases, activity, selfWrites, () => {
     const snapshot = library.snapshot()
     for (const window of BrowserWindow.getAllWindows()) {
       window.webContents.send(IPC.libraryChanged, snapshot)

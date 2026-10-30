@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { basename, join, sep } from 'node:path'
 import type { AppState, Root, SongCacheEntry } from '../shared/schema'
-import type { Sidecar } from '../shared/sidecar'
+import type { Sidecar, Status } from '../shared/sidecar'
 import {
   artUrl,
   bounceUrl,
@@ -12,16 +12,20 @@ import {
   type LibrarySnapshot,
   type QueueSort,
   type ReleaseProgress,
+  type SessionStats,
   type SetLaneResult,
   type SongRelease,
   type SongSummary
 } from '../shared/songs'
 import { findBounces, playableFile, previewBounce, type Bounce } from './bounces'
 import type { ReleaseStore } from './releases'
+import { dropBulkCopies, findSaves, toSessions, type ActivityStore, type FoundSave } from './activity'
+import type { WorkSession } from '../shared/activity'
 import { discoverProjects, type AlsFile, type DiscoveredProject } from './scanner'
 import {
   createSidecarFile,
   defaultTitle,
+  localIso,
   newSidecar,
   readSidecar,
   writeSidecar,
@@ -67,8 +71,25 @@ function isInside(path: string, dir: string): boolean {
   return path.startsWith(dir.replace(/\/+$/, '') + sep)
 }
 
+export function sessionStats(sessions: WorkSession[], statusSince: string | null): SessionStats {
+  const since = statusSince ? Date.parse(statusSince) : Number.NEGATIVE_INFINITY
+  const inStatus = sessions.filter((s) => Date.parse(s.end) >= since)
+  const ms = sessions.reduce((sum, s) => sum + (Date.parse(s.end) - Date.parse(s.start)), 0)
+  return {
+    count: sessions.length,
+    lastAt: sessions.at(-1)?.end ?? null,
+    inStatus: inStatus.length,
+    firstInStatusAt: inStatus[0]?.start ?? null,
+    hours: Math.round((ms / 3_600_000) * 10) / 10
+  }
+}
+
 // A release's progress: its songs' weights over max(song count, planned tracks) (SPEC 8c).
-export function releaseProgress(members: SongSummary[], plannedTracks: number | null): ReleaseProgress {
+export function releaseProgress(
+  members: SongSummary[],
+  plannedTracks: number | null,
+  sessions30d = 0
+): ReleaseProgress {
   const byStatus: ReleaseProgress['byStatus'] = {}
   let sum = 0
   for (const song of members) {
@@ -76,7 +97,7 @@ export function releaseProgress(members: SongSummary[], plannedTracks: number | 
     sum += song.progress ?? 0
   }
   const slots = Math.max(members.length, plannedTracks ?? 0)
-  return { value: slots > 0 ? sum / slots : 0, songCount: members.length, plannedTracks, byStatus }
+  return { value: slots > 0 ? sum / slots : 0, songCount: members.length, plannedTracks, byStatus, sessions30d }
 }
 
 async function isDirectory(path: string): Promise<boolean> {
@@ -107,6 +128,7 @@ export class Library {
   constructor(
     private readonly store: StateStore,
     private readonly releases: ReleaseStore,
+    private readonly activity: ActivityStore,
     private readonly selfWrites: SelfWrites,
     private readonly onChange: () => void
   ) {}
@@ -201,6 +223,16 @@ export class Library {
     }
 
     const duplicates = await this.resolveDuplicateIds(candidates, state, warnings)
+
+    // Save history for work sessions (SPEC 7c).
+    const found = new Map<string, FoundSave[]>()
+    for (const { project, sidecar } of candidates) {
+      found.set(sidecar.id, await findSaves(project.path, project.alsFiles))
+    }
+    dropBulkCopies(found)
+    let activityChanged = false
+    for (const [id, saves] of found) activityChanged = this.activity.merge(id, saves) || activityChanged
+    if (activityChanged) await this.activity.persist()
 
     for (const { project, sidecar } of candidates) {
       this.songs.set(sidecar.id, {
@@ -307,6 +339,7 @@ export class Library {
       folder: record.folder,
       title: sidecar.title,
       status: sidecar.status,
+      statusSince: sidecar.statusHistory.at(-1)?.at ?? null,
       excitement: sidecar.excitement,
       latestNext: latestNext(sidecar),
       lastWorkedAt: lastWorkedAt(sidecar, record.newestAls),
@@ -332,6 +365,7 @@ export class Library {
       folder: project.folder,
       status: null,
       progress: null,
+      statusSince: null,
       excitement: null,
       latestNext: null,
       lastWorkedAt: null,
@@ -342,7 +376,8 @@ export class Library {
       error,
       releases: [],
       preview: null,
-      bounceCount: 0
+      bounceCount: 0,
+      sessions: { count: 0, lastAt: null, inStatus: 0, firstInStatusAt: null, hours: 0 }
     }
   }
 
@@ -363,6 +398,22 @@ export class Library {
       })
     }
     return result.sort((a, b) => Number(b.fromFolder) - Number(a.fromFolder))
+  }
+
+  private releaseProgressOf(
+    releaseId: string,
+    plannedTracks: number | null,
+    songs: SongSummary[],
+    gapHours: number
+  ): ReleaseProgress {
+    const members = songs.filter((s) => s.releases.some((r) => r.id === releaseId))
+    const monthAgo = Date.now() - 30 * 86_400_000
+    let recent = 0
+    for (const song of members) {
+      const sessions = toSessions(this.activity.saves(song.id), this.songs.get(song.id)?.sidecar.sessions ?? [], gapHours)
+      recent += sessions.filter((s) => Date.parse(s.end) >= monthAgo).length
+    }
+    return releaseProgress(members, plannedTracks, recent)
   }
 
   private preview(record: SongRecord): BouncePreview | null {
@@ -413,6 +464,7 @@ export class Library {
         folder: entry.folder,
         status: (record?.sidecar.status ?? entry.status) as SongSummary['status'],
         progress: null,
+        statusSince: entry.statusSince,
         excitement: entry.excitement,
         latestNext: entry.latestNext,
         lastWorkedAt: entry.lastWorkedAt,
@@ -423,7 +475,11 @@ export class Library {
         error: null,
         releases: this.songReleases(id, entry.path),
         preview: record ? this.preview(record) : null,
-        bounceCount: record?.bounces.length ?? 0
+        bounceCount: record?.bounces.length ?? 0,
+        sessions: sessionStats(
+          toSessions(this.activity.saves(id), record?.sidecar.sessions ?? [], state.sessionGapHours),
+          entry.statusSince
+        )
       })
     }
     for (const song of songs) {
@@ -439,6 +495,8 @@ export class Library {
       focusCap: state.focusCap,
       queueSort: state.queueSort,
       staleness: state.staleness,
+      excitementScale: state.excitementScale,
+      savedFilters: state.savedFilters,
       roots: state.roots.map((r: Root) => ({
         path: r.path,
         label: r.label,
@@ -451,10 +509,7 @@ export class Library {
         type: r.type,
         released: r.released,
         artUrl: r.art ? artUrl(r.art) : null,
-        progress: releaseProgress(
-          songs.filter((s) => s.releases.some((sr) => sr.id === r.id)),
-          r.plannedTracks
-        )
+        progress: this.releaseProgressOf(r.id, r.plannedTracks, songs, state.sessionGapHours)
       })),
       scanning: this.isScanning(),
       lastScanAt: this.lastScanAt,
@@ -513,8 +568,28 @@ export class Library {
     this.onChange()
   }
 
+  async setSavedFilters(savedFilters: AppState['savedFilters']): Promise<void> {
+    await this.store.update((s) => ({ ...s, savedFilters }))
+    this.onChange()
+  }
+
   async setQueueSort(queueSort: QueueSort): Promise<void> {
     await this.store.update((s) => ({ ...s, queueSort }))
+    this.onChange()
+  }
+
+  // Changes a song's sidecar and refreshes its cache entry. The song's drive must be mounted
+  // (SPEC 8: songs on an unmounted drive are read-only).
+  private async editSidecar(id: string, change: (sidecar: Sidecar) => Sidecar): Promise<void> {
+    const record = this.songs.get(id)
+    if (!record) throw new Error("The song's drive isn't connected, so it can't be changed now")
+    const sidecar = change(record.sidecar)
+    await writeSidecar(record.path, sidecar, this.selfWrites)
+    record.sidecar = sidecar
+    await this.store.update((s) => {
+      const entry = s.songCache[id]
+      return entry ? { ...s, songCache: { ...s.songCache, [id]: this.cacheEntry(record, entry.seenAt) } } : s
+    })
     this.onChange()
   }
 
@@ -522,16 +597,29 @@ export class Library {
   async setTitle(id: string, title: string): Promise<void> {
     const trimmed = title.trim()
     if (!trimmed || trimmed.length > 200) throw new Error('A title needs 1 to 200 characters')
-    const record = this.songs.get(id)
-    if (!record) throw new Error("The song's drive isn't connected, so it can't be renamed now")
-    const sidecar: Sidecar = { ...record.sidecar, title: trimmed }
-    await writeSidecar(record.path, sidecar, this.selfWrites)
-    record.sidecar = sidecar
-    await this.store.update((s) => {
-      const entry = s.songCache[id]
-      return entry ? { ...s, songCache: { ...s.songCache, [id]: { ...entry, title: trimmed } } } : s
-    })
-    this.onChange()
+    await this.editSidecar(id, (sidecar) => ({ ...sidecar, title: trimmed }))
+  }
+
+  // Sets the status and appends it to statusHistory (SPEC 8). Setting the same status is a no-op.
+  async setStatus(id: string, status: Status): Promise<void> {
+    if (this.songs.get(id)?.sidecar.status === status) return
+    await this.editSidecar(id, (sidecar) => ({
+      ...sidecar,
+      status,
+      statusHistory: [...sidecar.statusHistory, { status, at: localIso() }]
+    }))
+  }
+
+  // Sets excitement 1–5 and appends it to excitementHistory with an optional note (SPEC 8a).
+  async setExcitement(id: string, value: number, note: string | null = null): Promise<void> {
+    if (!Number.isInteger(value) || value < 1 || value > 5) throw new Error('Excitement is 1 to 5')
+    const trimmed = note?.trim() || null
+    if (this.songs.get(id)?.sidecar.excitement === value && !trimmed) return
+    await this.editSidecar(id, (sidecar) => ({
+      ...sidecar,
+      excitement: value,
+      excitementHistory: [...sidecar.excitementHistory, { value, at: localIso(), note: trimmed }]
+    }))
   }
 
   // Puts a song on a release (SPEC 8b). Only releases.json changes; the song's folder and

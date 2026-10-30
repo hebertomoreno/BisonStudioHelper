@@ -1,5 +1,5 @@
 import type { LibrarySnapshot, SongSummary } from '../../../shared/songs'
-import { locationLabel, relativeTime, staleness } from '../lib/songs'
+import { daysSince, locationLabel, plural, relativeTime, staleness } from '../lib/songs'
 
 export function LastWorked({
   song,
@@ -78,4 +78,37 @@ export function Bounced({ song }: { song: SongSummary }): JSX.Element | null {
       Bounced {relativeTime(song.preview.bouncedAt)}
     </span>
   )
+}
+
+// "11 sessions · last 3 days ago" (SPEC 7c).
+export function Sessions({ song }: { song: SongSummary }): JSX.Element | null {
+  const { count, lastAt, hours } = song.sessions
+  if (count === 0) return <span className="sessions muted">No sessions yet</span>
+  return (
+    <span className="sessions" title={hours >= 1 ? `About ${Math.round(hours)} h between first and last saves` : undefined}>
+      {plural(count, 'session')}
+      {lastAt && ` · last ${relativeTime(lastAt)}`}
+    </span>
+  )
+}
+
+// "mixing · 6 sessions over 5 weeks": effort in the current stage, which restarts on each status change.
+export function StageSessions({ song }: { song: SongSummary }): JSX.Element | null {
+  const { inStatus, firstInStatusAt } = song.sessions
+  if (!song.status || !song.statusSince) return null
+  const span = firstInStatusAt ? spanSince(firstInStatusAt) : null
+  return (
+    <span className="stage-sessions" title={`In ${song.status} since ${new Date(song.statusSince).toLocaleDateString()}`}>
+      {song.status} · {plural(inStatus, 'session')}
+      {span && inStatus > 1 ? ` over ${span}` : ''}
+    </span>
+  )
+}
+
+function spanSince(iso: string): string | null {
+  const days = daysSince(iso)
+  if (days < 1) return null
+  if (days < 14) return plural(days, 'day')
+  if (days < 60) return plural(Math.round(days / 7), 'week')
+  return plural(Math.round(days / 30), 'month')
 }

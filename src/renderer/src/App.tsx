@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { PlayerBar, PlayerProvider } from './components/Player'
 import { useLibrary } from './lib/useLibrary'
+import { BoardView } from './views/BoardView'
 import { MainListView } from './views/MainListView'
 import { Placeholder } from './views/Placeholder'
 import { SettingsView } from './views/SettingsView'
@@ -35,6 +36,7 @@ export function App(): JSX.Element {
     }
     if (view === 'main') return <MainListView snapshot={library} />
     if (view === 'shelf') return <ShelfView snapshot={library} />
+    if (view === 'board') return <BoardView snapshot={library} />
     return <Placeholder title={current.label} step={current.step} />
   }
 

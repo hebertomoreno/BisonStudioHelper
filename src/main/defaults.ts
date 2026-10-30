@@ -45,6 +45,7 @@ export function defaultState(home: string): AppState {
     ],
     inbox: { ignored: [], matchThreshold: 60 },
     progressWeights: { idea: 0, demo: 0.25, 'in production': 0.55, mixing: 0.8, finished: 1 },
+    sessionGapHours: 3,
     staleness: { amberDays: 7, redDays: 21 },
     excitementScale: [
       { value: 1, emoji: '😐', label: 'Not feeling it' },

@@ -1,5 +1,6 @@
 // IPC contract between main and renderer. The preload exposes FinisherApi as window.finisher.
 import type { Settings, SettingsPatch } from './schema'
+import type { Status } from './sidecar'
 import type { Lane, LibrarySnapshot, QueueSort, SetLaneResult } from './songs'
 
 export const IPC = {
@@ -12,8 +13,11 @@ export const IPC = {
   setLane: 'library:setLane',
   reorder: 'library:reorder',
   setQueueSort: 'library:setQueueSort',
+  setSavedFilters: 'library:setSavedFilters',
   addSongToRelease: 'release:addSong',
   setTitle: 'song:setTitle',
+  setStatus: 'song:setStatus',
+  setExcitement: 'song:setExcitement',
   pickReleaseArt: 'release:pickArt',
   // main → renderer push
   libraryChanged: 'library:changed'
@@ -47,8 +51,11 @@ export interface FinisherApi {
   setLane(ids: string[], lane: Lane, bumpToQueue?: string[]): Promise<SetLaneResult>
   reorder(lane: 'focus' | 'queue', ids: string[]): Promise<void>
   setQueueSort(sort: QueueSort): Promise<void>
+  setSavedFilters(filters: { name: string; filter: Record<string, unknown> }[]): Promise<void>
   addSongToRelease(songId: string, releaseId: string): Promise<void>
   setTitle(songId: string, title: string): Promise<void>
+  setStatus(songId: string, status: Status): Promise<void>
+  setExcitement(songId: string, value: number, note?: string | null): Promise<void>
   // Opens an image picker and stores the chosen file as the release's cover. False if cancelled.
   pickReleaseArt(releaseId: string): Promise<boolean>
   // Returns an unsubscribe function.

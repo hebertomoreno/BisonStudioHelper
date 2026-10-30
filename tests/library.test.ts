@@ -2,6 +2,7 @@ import { cp, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Library, releaseProgress } from '../src/main/library'
+import { ActivityStore } from '../src/main/activity'
 import { ReleaseStore } from '../src/main/releases'
 import { SelfWrites } from '../src/main/sidecar'
 import { StateStore } from '../src/main/state'
@@ -24,7 +25,7 @@ async function setup(): Promise<void> {
   }))
   releases = new ReleaseStore(join(dir, 'releases.json'))
   await releases.load(() => ({ schemaVersion: 1, releases: [] }))
-  library = new Library(store, releases, new SelfWrites(), () => {})
+  library = new Library(store, releases, new ActivityStore(join(dir, 'activity.json')), new SelfWrites(), () => {})
 }
 
 const byTitle = (title: string): SongSummary | undefined =>
@@ -253,5 +254,38 @@ describe('releases and bounces', () => {
     expect(releaseProgress(members, null).value).toBeCloseTo(0.6833, 3)
     expect(releaseProgress(members, 5).value).toBeCloseTo(0.41, 3)
     expect(releaseProgress([], null).value).toBe(0)
+  })
+
+  it('records status and excitement changes in the sidecar history', async () => {
+    await library.scan()
+    const id = byTitle('Earth')!.id
+    await library.setStatus(id, 'mixing')
+    await library.setStatus(id, 'mixing')
+    await library.setExcitement(id, 4, '  chorus works ')
+    await expect(library.setExcitement(id, 6)).rejects.toThrow('1 to 5')
+
+    const sidecar = await sidecarOf(join(songsA, 'Earth Project'))
+    expect((sidecar.statusHistory as { status: string }[]).map((h) => h.status)).toEqual(['idea', 'mixing'])
+    expect(sidecar.excitementHistory).toMatchObject([{ value: 4, note: 'chorus works' }])
+    expect(byTitle('Earth')).toMatchObject({ status: 'mixing', excitement: 4, progress: 0.8 })
+    expect(byTitle('Earth')!.statusSince).toBe((sidecar.statusHistory as { at: string }[])[1].at)
+    expect(store.get().songCache[id]).toMatchObject({ status: 'mixing', excitement: 4 })
+  })
+
+  it('counts work sessions from Live backups, overall and in the current status', async () => {
+    const project = join(songsA, 'Earth Project')
+    await mkdir(join(project, 'Backup'), { recursive: true })
+    for (const name of ['Song [2026-09-01 101500].als', 'Song [2026-09-01 113000].als', 'Song [2026-10-05 200000].als']) {
+      await writeFile(join(project, 'Backup', name), 'x')
+    }
+    await library.scan()
+    const id = byTitle('Earth')!.id
+    // The set's own mtime (2023) and the backups' mtimes (now) are saves too.
+    expect(byTitle('Earth')!.sessions.count).toBe(4)
+
+    await library.setStatus(id, 'mixing')
+    await writeFile(join(project, 'Backup', 'Song [2099-01-01 120000].als'), 'x')
+    await library.scan()
+    expect(byTitle('Earth')!.sessions).toMatchObject({ count: 5, inStatus: 2 })
   })
 })

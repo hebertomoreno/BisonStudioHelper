@@ -42,6 +42,8 @@ export interface ReleaseProgress {
   songCount: number
   plannedTracks: number | null
   byStatus: Partial<Record<Status, number>>
+  // Sessions on the release's songs in the last 30 days.
+  sessions30d: number
 }
 
 export interface ReleaseSummary {
@@ -65,6 +67,7 @@ export interface SongSummary {
   // First-level folder under the root's foldersPath, e.g. "Rough Ideas".
   folder: string | null
   status: Status | null
+  statusSince: string | null
   // The status's weight, 0 to 1 (SPEC 8c). Null when the status is unknown.
   progress: number | null
   excitement: number | null
@@ -80,6 +83,19 @@ export interface SongSummary {
   // Pinned bounce, else the newest. Null when there are none or the drive is not mounted.
   preview: BouncePreview | null
   bounceCount: number
+  sessions: SessionStats
+}
+
+// Work sessions from saves and Open in Live (SPEC 7c).
+export interface SessionStats {
+  count: number
+  lastAt: string | null
+  // Sessions since the song entered its current status ("Mixing · 6 sessions over 5 weeks").
+  inStatus: number
+  // Start of the first session in the current status.
+  firstInStatusAt: string | null
+  // Sum of session spans; a lower bound, since time before a session's first save is unknown.
+  hours: number
 }
 
 export interface RootSummary {
@@ -96,6 +112,8 @@ export interface LibrarySnapshot {
   focusCap: number
   queueSort: QueueSort
   staleness: AppState['staleness']
+  excitementScale: AppState['excitementScale']
+  savedFilters: AppState['savedFilters']
   roots: RootSummary[]
   releases: ReleaseSummary[]
   scanning: boolean

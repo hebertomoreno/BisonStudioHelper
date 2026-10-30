@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs'
 import { extname, join } from 'node:path'
 import { BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { ZodError } from 'zod'
-import { SettingsPatchSchema } from '../shared/schema'
+import { AppStateSchema, SettingsPatchSchema } from '../shared/schema'
 import {
   IPC,
   type PathStatus,
@@ -11,6 +11,7 @@ import {
   type SettingsResult,
   type UpdateSettingsResult
 } from '../shared/ipc'
+import { STATUSES, type Status } from '../shared/sidecar'
 import type { Lane, QueueSort, SetLaneResult } from '../shared/songs'
 import type { Library } from './library'
 import type { ReleaseStore } from './releases'
@@ -78,6 +79,16 @@ export function registerIpc(
     return library.setTitle(songId, title)
   })
 
+  handle(IPC.setStatus, (_event, songId: unknown, status: unknown) => {
+    if (typeof songId !== 'string' || !STATUSES.includes(status as Status)) throw new Error('Invalid song or status')
+    return library.setStatus(songId, status as Status)
+  })
+
+  handle(IPC.setExcitement, (_event, songId: unknown, value: unknown, note: unknown) => {
+    if (typeof songId !== 'string' || typeof value !== 'number') throw new Error('Invalid song or excitement')
+    return library.setExcitement(songId, value, typeof note === 'string' ? note.slice(0, 300) : null)
+  })
+
   // Copies the chosen image into the app's art folder; project and release folders are never written.
   handle(IPC.pickReleaseArt, async (event, releaseId: unknown): Promise<boolean> => {
     const release = typeof releaseId === 'string' ? releases.find(releaseId) : undefined
@@ -103,6 +114,12 @@ export function registerIpc(
     const previous = await library.setReleaseArt(release.id, name)
     if (previous) await fs.rm(join(artDir, previous), { force: true })
     return true
+  })
+
+  handle(IPC.setSavedFilters, (_event, filters: unknown) => {
+    const parsed = AppStateSchema.shape.savedFilters.safeParse(filters)
+    if (!parsed.success) throw new Error('Invalid saved filters')
+    return library.setSavedFilters(parsed.data.slice(0, 50))
   })
 
   handle(IPC.getSettings, (): SettingsResult => ({

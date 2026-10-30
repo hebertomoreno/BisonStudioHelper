@@ -4,7 +4,8 @@ import type { LibrarySnapshot, SongSummary } from '../../../shared/songs'
 import { Cover } from './Cover'
 import { EditableTitle } from './EditableTitle'
 import { percent, ProgressBar } from './ProgressBar'
-import { Bounced, LastWorked, Location, SongTags, StatusPill } from './SongBits'
+import { Bounced, LastWorked, Location, Sessions, SongTags, StageSessions } from './SongBits'
+import { ExcitementPicker, StatusSelect, type useSongEditor } from './SongControls'
 import type { useLaneMover } from './useLaneMover'
 
 const SIDE_OFFSET_PX = 230
@@ -14,11 +15,12 @@ interface Props {
   snapshot: LibrarySnapshot
   onMove: ReturnType<typeof useLaneMover>['move']
   onReorder: (ids: string[]) => void
+  editor: ReturnType<typeof useSongEditor>
 }
 
 // Focus songs as CD cases on a stage: the selected one large in the middle, its neighbors
 // smaller on either side. Click a neighbor or use ← → to bring it to the middle.
-export function FocusStage({ songs, snapshot, onMove, onReorder }: Props): JSX.Element {
+export function FocusStage({ songs, snapshot, onMove, onReorder, editor }: Props): JSX.Element {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const found = songs.findIndex((s) => s.id === selectedId)
   const index = found === -1 ? 0 : found
@@ -103,6 +105,7 @@ export function FocusStage({ songs, snapshot, onMove, onReorder }: Props): JSX.E
                 {releaseProgress.plannedTracks && releaseProgress.plannedTracks > releaseProgress.songCount
                   ? `${releaseProgress.songCount} of ${releaseProgress.plannedTracks} tracks`
                   : `${releaseProgress.songCount} ${releaseProgress.songCount === 1 ? 'song' : 'songs'}`}
+                {releaseProgress.sessions30d > 0 && ` · ${releaseProgress.sessions30d} sessions this month`}
               </span>
             </div>
           )}
@@ -115,15 +118,22 @@ export function FocusStage({ songs, snapshot, onMove, onReorder }: Props): JSX.E
               {selected.setName}.als
             </p>
           )}
-          {selected.progress !== null && (
-            <div className="song-progress">
-              <StatusPill song={selected} />
-              <ProgressBar value={selected.progress} label={`${selected.title} progress`} />
-              <span className="song-progress-value">{percent(selected.progress)}</span>
-            </div>
-          )}
+          <div className="song-progress">
+            <StatusSelect song={selected} onChange={(status) => void editor.setStatus(selected, status)} />
+            <ProgressBar value={selected.progress ?? 0} label={`${selected.title} progress`} />
+            <span className="song-progress-value">{percent(selected.progress ?? 0)}</span>
+          </div>
           <div className="focus-status">
+            <ExcitementPicker
+              song={selected}
+              scale={snapshot.excitementScale}
+              onPick={(value, note) => void editor.setExcitement(selected, value, note)}
+            />
             <LastWorked song={selected} thresholds={snapshot.staleness} />
+          </div>
+          <div className="focus-sessions">
+            <StageSessions song={selected} />
+            <Sessions song={selected} />
           </div>
           <div className="focus-details">
             <Location song={selected} />

@@ -29,6 +29,8 @@ export const SongCacheEntrySchema = z.object({
   folder: z.string().nullable().default(null),
   title: z.string(),
   status: z.string(),
+  // When the song entered its current status (latest statusHistory entry).
+  statusSince: z.string().nullable().default(null),
   excitement: z.number().nullable(),
   latestNext: z.string().nullable(),
   lastWorkedAt: z.string().nullable(),
@@ -70,6 +72,8 @@ export const AppStateSchema = z.object({
     mixing: z.number().min(0).max(1),
     finished: z.number().min(0).max(1)
   }),
+  // Saves less than this many hours apart are one work session (SPEC 7c).
+  sessionGapHours: z.number().min(0.5).max(24),
   staleness: z
     .object({ amberDays: z.number().int().min(1), redDays: z.number().int().min(1) })
     .refine((s) => s.amberDays < s.redDays, { message: 'amber days must be less than red days' }),
