@@ -173,6 +173,7 @@ App-level state lives in `app.getPath('userData')/state.json`:
     "/Volumes/Feather/Bounces"
   ],
   "inbox": { "ignored": ["/abs/path", "..."], "matchThreshold": 60 },
+  "sessionGapHours": 3,
   "progressWeights": { "idea": 0, "demo": 0.25, "in production": 0.55, "mixing": 0.8, "finished": 1 },
   "staleness": { "amberDays": 7, "redDays": 21 },
   "excitementScale": [{ "value": 1, "emoji": "😐", "label": "Not feeling it" }],
@@ -399,9 +400,9 @@ Decisions are never applied automatically, even for high scores. The user confir
 Sessions are also counted without the user doing anything, from `.als` saves. This shows how much work has gone into a song, especially in long stages like mixing.
 
 **Sources of saves**
-- **Live's backups.** On every save, Live moves the previous version into the project's `Backup/` folder as `<Set name> [YYYY-MM-DD HHMMSS].als`, keeping the last 10 per set. The timestamp in the file name is the save time; trust it over file mtimes. Read only the names; never open or change these files.
-- **The save log.** From now on, the watcher records every `.als` save in the project root (an add or change event on an `.als` file, after its size settles) with the set name and time. Skip `Backup/`, which is already excluded from scanning.
-- **Current `.als` mtimes**, only when they are newer than every backup timestamp for that set.
+- **Live's backups.** On every save, Live moves the previous version into the project's `Backup/` folder as `<Set name> [YYYY-MM-DD HHMMSS].als`, keeping the last 10 per set. Checked on WeAreNotToBlame: the name is the time of the *new* save (when the backup was made), and the backup file's mtime is the time of the *previous* save. So each backup yields two saves. Only names and mtimes are read; these files are never opened or changed.
+- **Current `.als` mtimes**: each set's latest save.
+- **Going forward**, every save triggers a watcher rescan (section 3), which picks up the set's new mtime and Live's new backup. This is the save log; no separate watcher hook is needed.
 - **Bulk-copy guard.** File mtimes can come from copying, not working: several YearOfTheBrownBear sets carry the same 2026-07-09 mtime. Ignore a mtime-based save when more than 3 projects share the same mtime minute. Backup names and live watcher events are never ignored.
 - **"Open in Live" sessions** (section 7) also count, so a session where the user listens or tweaks without saving still shows up.
 
@@ -412,14 +413,13 @@ Sessions are also counted without the user doing anything, from `.als` saves. Th
   "schemaVersion": 1,
   "saves": {
     "<songId>": [
-      { "at": "2026-10-08T17:41:15-06:00", "set": "WeAreNotToBlame", "source": "backup | watcher | mtime" }
+      { "at": "2026-10-08T23:41:15.000Z", "set": "WeAreNotToBlame", "source": "backup | mtime" }
     ]
-  },
-  "importedBackups": { "<songId>": "2026-10-20T13:47:54-06:00" }
+  }
 }
 ```
 
-- Each scan imports backup timestamps newer than `importedBackups[songId]`. Saves are deduplicated by set and time (within 2 seconds), since a watcher save shows up later as a backup too.
+- Each scan merges the saves it sees into the log. Saves are deduplicated by set and time (within 2 seconds), since the same save shows up as a set mtime, then a backup name, then a backup mtime.
 - The first scan imports all existing backups, so songs start with real history. Surveyed 2026-10-29: 24 of Feather's 89 projects already show 5 or more sessions (WeAreNotToBlame 11, A WATERFALL 10, Boxing2 8).
 - Songs on an unmounted drive keep their history; only new saves wait for the drive.
 
@@ -575,7 +575,7 @@ The app's main job is showing how close a song, and a release, is to done. This 
 4. Sessions (end modal, notes, next), last-worked calculation.
 4a. Bounce folder detection (name variants, wrappers, loose files), custom protocol, player bar (section 7a).
 4b. Bounce inbox: iCloud placeholders, matching, copy/move/link/ignore, linked bounces, aliases (section 7b).
-5. Status + history + board view. Excitement rating + history + filters/sort (section 8a). Work sessions from saves: backup import, save log, sessions, sessions in the current stage (section 7c).
+5. Status + history + board view. Excitement rating + history + filters/sort (section 8a). Work sessions from saves: backup import, save log, sessions, sessions in the current stage (section 7c). Built; song detail (timeline, session list, excitement chart) comes with the song detail view.
 6. `.als` parser and collect detection, with fixture tests (section 5).
 6a. Releases view: release database (done: `releases.json`, folder pointers, art), create/rename/repoint/delete, membership (exclude, add, order), Folders tab (section 8b).
 6b. Release progress: weights, planned track count, progress bar, forecast, holding-back list (section 8c). Needs step 5 (statuses).
